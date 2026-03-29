@@ -5,28 +5,80 @@ virtual memory management techniques.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import time
+from collections import OrderedDict
+
+
+def simulate_lru(pages, num_frames):
+    """
+    Simulate LRU page replacement algorithm.
+    
+    Args:
+        pages: List of page numbers (integers)
+        num_frames: Number of memory frames
+        
+    Returns:
+        tuple: (frame_snapshots, fault_flags, total_faults)
+            - frame_snapshots: list of lists showing frame contents at each step
+            - fault_flags: list of booleans (True = page fault, False = hit)
+            - total_faults: total count of page faults
+    """
+    frames = []
+    frame_snapshots = []
+    fault_flags = []
+    total_faults = 0
+    recent_use = OrderedDict()
+    
+    for page in pages:
+        if page in frames:
+            fault_flags.append(False)
+            recent_use.move_to_end(page)
+        else:
+            total_faults += 1
+            fault_flags.append(True)
+            
+            if len(frames) < num_frames:
+                frames.append(page)
+            else:
+                lru_page = next(iter(recent_use))
+                idx = frames.index(lru_page)
+                frames[idx] = page
+                del recent_use[lru_page]
+            
+            recent_use[page] = True
+        
+        frame_snapshots.append(frames.copy())
+    
+    return frame_snapshots, fault_flags, total_faults
+
+
+def parse_page_reference(page_str):
+    """Parse page reference string into list of integers."""
+    try:
+        pages = [int(p.strip()) for p in page_str.replace(',', ' ').split() if p.strip()]
+        return pages
+    except ValueError:
+        return None
 
 
 class AnimatedButton(tk.Canvas):
     """Animated button with smooth hover and click effects."""
 
-    def __init__(self, parent, text="", command=None, width=180, height=45, **kwargs):
+    def __init__(self, parent, text="", command=None, width=200, height=48, **kwargs):
         super().__init__(parent, width=width, height=height)
         self.command = command
         self._text = text
-        self.base_bg = "#3b82f6"
-        self.hover_bg = "#2563eb"
-        self.active_bg = "#1d4ed8"
+        self.base_bg = "#1a6bff"
+        self.hover_bg = "#3388ff"
+        self.active_bg = "#0055dd"
         self.text_color = "white"
-        self.corner_radius = 12
+        self.corner_radius = 10
         self.current_bg = self.base_bg
-        self.animation_running = False
         self.hovered = False
         self.clicked = False
 
-        self.configure(highlightthickness=0, bg="#1a1a2e", cursor="hand2")
+        self.configure(highlightthickness=0, bg="#0f172a", cursor="hand2")
         self._text_id = None
         self._draw_button()
 
@@ -35,12 +87,15 @@ class AnimatedButton(tk.Canvas):
         self.bind("<Button-1>", self._on_click)
         self.bind("<ButtonRelease-1>", self._on_release)
 
+        self.bind("<Configure>", lambda e: self._draw_button())
+
     def _draw_button(self):
         """Draw the rounded rectangle and text."""
         self.delete("all")
-        w, h = self.winfo_width() or 180, self.winfo_height() or 45
-        self.create_rounded_rect(0, 0, w, h, self.corner_radius, fill=self.current_bg, outline="")
-        self._text_id = self.create_text(w // 2, h // 2, text=self._text, fill=self.text_color, font=("Inter", 12, "bold"))
+        w = max(self.winfo_width(), 200)
+        h = max(self.winfo_height(), 48)
+        self.create_rounded_rect(2, 2, w - 2, h - 2, self.corner_radius, fill=self.current_bg, outline="")
+        self._text_id = self.create_text(w // 2, h // 2, text=self._text, fill=self.text_color, font=("Segoe UI", 12, "bold"))
 
     def create_rounded_rect(self, x1, y1, x2, y2, radius, **kwargs):
         points = []
@@ -48,24 +103,15 @@ class AnimatedButton(tk.Canvas):
         points = [x1 + r, y1, x2 - r, y1, x2, y1 + r, x2, y2 - r, x2 - r, y2, x1 + r, y2, x1, y2 - r, x1, y1 + r]
         return self.create_polygon(points, smooth=True, joinstyle=tk.ROUND, **kwargs)
 
-    def _animate_color(self, target_color):
-        """Animate color transition."""
-        if not self.hovered and not self.clicked:
-            return
-        self.current_bg = target_color
-        self._draw_button()
-
     def _on_enter(self, event):
         self.hovered = True
         self.current_bg = self.hover_bg
         self._draw_button()
-        self.configure(bg="#1e3a5f")
 
     def _on_leave(self, event):
         self.hovered = False
         self.current_bg = self.base_bg
         self._draw_button()
-        self.configure(bg="#1a1a2e")
 
     def _on_click(self, event):
         self.clicked = True
@@ -84,35 +130,37 @@ class AnimatedButton(tk.Canvas):
 
 
 class ModernEntry(tk.Frame):
-    """Modern styled entry with animated focus border."""
+    """Modern styled entry with animated focus border and placeholder text."""
 
     def __init__(self, parent, placeholder="", width=40, **kwargs):
         super().__init__(parent, **kwargs)
         self.placeholder = placeholder
-        self.placeholder_color = "#6b7280"
-        self.text_color = "#e5e7eb"
+        self.placeholder_color = "#6e7681"
+        self.text_color = "#ffffff"
         self.border_color = "#374151"
-        self.focus_color = "#3b82f6"
+        self.focus_color = "#1a6bff"
         self.current_border_color = self.border_color
+        self._has_focus = False
+        self._has_value = False
 
         self.configure(bg="#1f2937", highlightthickness=2, highlightcolor=self.border_color, highlightbackground=self.border_color)
 
         self.entry = tk.Entry(
             self,
-            font=("Inter", 11),
+            font=("Segoe UI", 11),
             bg="#1f2937",
-            fg=self.text_color,
+            fg=self.placeholder_color,
             insertbackground=self.text_color,
             relief=tk.FLAT,
             bd=0,
             width=width
         )
         self.entry.pack(fill="x", padx=12, pady=10)
+        self.entry.insert(0, self.placeholder)
 
-        self._show_placeholder()
         self.entry.bind("<FocusIn>", self._on_focus_in)
         self.entry.bind("<FocusOut>", self._on_focus_out)
-        self.entry.bind("<KeyRelease>", self._on_key_release)
+        self.entry.bind("<Key>", self._on_key)
 
         self.after(100, self._update_border)
 
@@ -120,40 +168,45 @@ class ModernEntry(tk.Frame):
         """Update the border color."""
         self.configure(highlightbackground=self.current_border_color, highlightcolor=self.current_border_color)
 
-    def _show_placeholder(self):
-        self.entry.delete(0, tk.END)
-        self.entry.insert(0, self.placeholder)
-        self.entry.configure(fg=self.placeholder_color)
-
-    def _hide_placeholder(self):
-        if self.entry.get() == self.placeholder:
-            self.entry.delete(0, tk.END)
-            self.entry.configure(fg=self.text_color)
+    def _on_focus_in(self, event):
+        self._has_focus = True
         self.current_border_color = self.focus_color
         self._update_border()
-
-    def _on_focus_in(self, event):
-        self._hide_placeholder()
+        if not self._has_value:
+            self.entry.delete(0, tk.END)
+            self.entry.configure(fg=self.text_color)
 
     def _on_focus_out(self, event):
-        if self.entry.get() == "":
-            self._show_placeholder()
+        self._has_focus = False
         self.current_border_color = self.border_color
         self._update_border()
+        value = self.entry.get()
+        if value == "":
+            self.entry.insert(0, self.placeholder)
+            self.entry.configure(fg=self.placeholder_color)
+            self._has_value = False
+        else:
+            self._has_value = True
 
-    def _on_key_release(self, event):
-        if self.entry.get() == "":
-            self.current_border_color = self.border_color
-            self._update_border()
+    def _on_key(self, event):
+        value = self.entry.get()
+        if not self._has_value and not self._has_focus:
+            self.entry.delete(0, tk.END)
+            self.entry.configure(fg=self.text_color)
+        if value and value != self.placeholder:
+            self._has_value = True
+        elif value == "":
+            self._has_value = False
 
     def get(self):
         value = self.entry.get()
-        return "" if value == self.placeholder else value
+        return value if value != self.placeholder else ""
 
     def insert(self, index, text):
         self.entry.delete(0, tk.END)
-        self._hide_placeholder()
         self.entry.insert(0, text)
+        self.entry.configure(fg=self.text_color)
+        self._has_value = True
 
 
 class ModernDropdown(tk.Frame):
@@ -185,14 +238,19 @@ class ModernDropdown(tk.Frame):
         style.configure("Modern.TCombobox",
                        fieldbackground="#1f2937",
                        background="#1f2937",
-                       foreground="#e5e7eb",
+                       foreground="#ffffff",
                        borderwidth=0,
-                       padding=0)
+                       padding=0,
+                       arrowsize=14)
         style.configure("Modern.Treeview",
                        background="#1f2937",
                        fieldbackground="#1f2937",
-                       foreground="#e5e7eb")
+                       foreground="#ffffff")
+        style.map("Modern.TCombobox",
+                 fieldbackground=[("readonly", "#1f2937")],
+                 foreground=[("readonly", "#ffffff")])
         self.dropdown.configure(style="Modern.TCombobox")
+        self.dropdown.current(0)
 
     def get(self):
         return self.selected_value.get()
@@ -406,7 +464,7 @@ class VirtualMemoryApp:
             fg=self.text_secondary
         ).grid(row=0, column=0, sticky="w", pady=(10, 5))
 
-        self.page_ref_entry = ModernEntry(input_container, placeholder="7, 0, 1, 2, 0, 3, 0, 4, 1, 2", width=45)
+        self.page_ref_entry = ModernEntry(input_container, placeholder="e.g. 7 0 1 2 0 3 0 4 2 3", width=45)
         self.page_ref_entry.grid(row=1, column=0, sticky="ew", pady=(0, 15), columnspan=2)
 
         tk.Label(
@@ -417,7 +475,7 @@ class VirtualMemoryApp:
             fg=self.text_secondary
         ).grid(row=2, column=0, sticky="w", pady=(0, 5))
 
-        self.frames_entry = ModernEntry(input_container, placeholder="3", width=45)
+        self.frames_entry = ModernEntry(input_container, placeholder="e.g. 3", width=45)
         self.frames_entry.grid(row=3, column=0, sticky="ew", pady=(0, 15), columnspan=2)
 
         tk.Label(
@@ -495,20 +553,41 @@ class VirtualMemoryApp:
         )
         self.hit_ratio_label.pack(side="left")
 
-        output_frame = tk.Frame(card, bg="#1e293b")
-        output_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+        table_container = tk.Frame(card, bg="#1e293b")
+        table_container.pack(fill="both", expand=True, padx=20, pady=(0, 15))
 
-        self.output_label = tk.Label(
-            output_frame,
-            text="Click 'Run Simulation' to see the page replacement algorithm in action...",
-            font=("Inter", 11),
-            bg="#1e293b",
-            fg=self.text_secondary,
-            justify="left",
-            anchor="nw",
-            wraplength=500
-        )
-        self.output_label.pack(fill="both", expand=True, pady=10)
+        self.result_tree = ttk.Treeview(table_container, show="headings", style="Modern.Treeview")
+        
+        scrollbar_y = ttk.Scrollbar(table_container, orient="vertical", command=self.result_tree.yview)
+        scrollbar_x = ttk.Scrollbar(table_container, orient="horizontal", command=self.result_tree.xview)
+        self.result_tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+
+        self.result_tree.pack(side="left", fill="both", expand=True)
+        scrollbar_y.pack(side="right", fill="y")
+        scrollbar_x.pack(side="bottom", fill="x")
+
+        self.result_tree.tag_configure("fault", background="#7f1d1d", foreground="white")
+        self.result_tree.tag_configure("hit", background="#14532d", foreground="white")
+
+        self._style_treeview()
+
+    def _style_treeview(self):
+        """Style the Treeview widget."""
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Modern.Treeview",
+                        background="#1f2937",
+                        fieldbackground="#1f2937",
+                        foreground="#e5e7eb",
+                        rowheight=28,
+                        borderwidth=0)
+        style.configure("Modern.Treeview.Heading",
+                        background="#374151",
+                        fieldbackground="#374151",
+                        foreground="#f1f5f9",
+                        font=("Inter", 10, "bold"),
+                        borderwidth=0)
+        style.map("Modern.Treeview", background=[("selected", "#3b82f6")])
 
     def _create_segmentation_tab(self):
         """Create the Segmentation tab content."""
@@ -595,11 +674,64 @@ class VirtualMemoryApp:
         placeholder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
     def _on_run_clicked(self):
-        """Placeholder handler for Run Simulation button."""
-        self.output_label.configure(
-            text="Simulation logic will be implemented here...\n\nInput received:\n• Page Reference: " + self.page_ref_entry.get() + "\n• Frames: " + self.frames_entry.get() + "\n• Algorithm: " + self.algorithm_dropdown.get(),
-            fg=self.text_primary
-        )
+        """Handle Run Simulation button click."""
+        page_ref_str = self.page_ref_entry.get()
+        frames_str = self.frames_entry.get()
+
+        if not page_ref_str:
+            messagebox.showerror("Input Error", "Please enter a page reference string.")
+            return
+        
+        if not frames_str:
+            messagebox.showerror("Input Error", "Please enter the number of frames.")
+            return
+
+        pages = parse_page_reference(page_ref_str)
+        if pages is None or len(pages) == 0:
+            messagebox.showerror("Input Error", "Invalid page reference string. Please enter space or comma-separated integers.")
+            return
+
+        try:
+            num_frames = int(frames_str)
+            if num_frames <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Input Error", "Number of frames must be a positive integer.")
+            return
+
+        if num_frames > 10:
+            messagebox.showwarning("Warning", "Large number of frames may affect visualization.")
+        
+        frames_snapshots, fault_flags, total_faults = simulate_lru(pages, num_frames)
+        self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
+
+    def _display_results(self, pages, frame_snapshots, fault_flags, total_faults, num_frames):
+        """Display simulation results in the Treeview table."""
+        for item in self.result_tree.get_children():
+            self.result_tree.delete(item)
+        
+        columns = ["Step", "Page"] + [f"Frame {i+1}" for i in range(num_frames)] + ["Fault?"]
+        self.result_tree["columns"] = columns
+        self.result_tree["show"] = "headings"
+        
+        for col in columns:
+            self.result_tree.heading(col, text=col)
+            self.result_tree.column(col, width=80, anchor="center")
+        
+        for i, (page, frames, is_fault) in enumerate(zip(pages, frame_snapshots, fault_flags)):
+            row_values = [i + 1, page] + frames + [""] * (num_frames - len(frames))
+            fault_text = "FAULT" if is_fault else "HIT"
+            row_values.append(fault_text)
+            
+            tag = "fault" if is_fault else "hit"
+            self.result_tree.insert("", "end", values=row_values, tags=(tag,))
+
+        total_steps = len(pages)
+        hits = total_steps - total_faults
+        hit_ratio = (hits / total_steps * 100) if total_steps > 0 else 0
+        
+        self.page_faults_label.configure(text=f"Page Faults: {total_faults}")
+        self.hit_ratio_label.configure(text=f"Hit Ratio: {hit_ratio:.1f}%")
 
 
 def main():
