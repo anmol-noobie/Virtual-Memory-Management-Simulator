@@ -53,6 +53,62 @@ def simulate_lru(pages, num_frames):
     return frame_snapshots, fault_flags, total_faults
 
 
+def simulate_optimal(pages, num_frames):
+    """
+    Simulate Optimal page replacement algorithm.
+    
+    Args:
+        pages: List of page numbers (integers)
+        num_frames: Number of memory frames
+        
+    Returns:
+        tuple: (frame_snapshots, fault_flags, total_faults)
+            - frame_snapshots: list of lists showing frame contents at each step
+            - fault_flags: list of booleans (True = page fault, False = hit)
+            - total_faults: total count of page faults
+    """
+    frames = []
+    frame_snapshots = []
+    fault_flags = []
+    total_faults = 0
+    
+    for i, page in enumerate(pages):
+        if page in frames:
+            fault_flags.append(False)
+        else:
+            total_faults += 1
+            fault_flags.append(True)
+            
+            if len(frames) < num_frames:
+                frames.append(page)
+            else:
+                future_refs = pages[i + 1:]
+                replace_idx = 0
+                max_distance = -1
+                
+                for j, frame_page in enumerate(frames):
+                    try:
+                        distance = future_refs.index(frame_page)
+                    except ValueError:
+                        distance = len(future_refs) + 1
+                    
+                    if distance > max_distance:
+                        max_distance = distance
+                        replace_idx = j
+                
+                frames[replace_idx] = page
+        
+        frame_snapshots.append(frames.copy())
+    
+    return frame_snapshots, fault_flags, total_faults
+
+
+ALGORITHMS = {
+    "LRU": simulate_lru,
+    "Optimal": simulate_optimal
+}
+
+
 def parse_page_reference(page_str):
     """Parse page reference string into list of integers."""
     try:
@@ -486,7 +542,7 @@ class VirtualMemoryApp:
             fg=self.text_secondary
         ).grid(row=4, column=0, sticky="w", pady=(0, 5))
 
-        self.algorithm_dropdown = ModernDropdown(input_container, values=["LRU", "Optimal", "FIFO", "Clock"], width=45)
+        self.algorithm_dropdown = ModernDropdown(input_container, values=["LRU", "Optimal"], width=45)
         self.algorithm_dropdown.grid(row=5, column=0, sticky="ew", pady=(0, 10), columnspan=2)
 
         input_container.columnconfigure(0, weight=1)
@@ -570,6 +626,20 @@ class VirtualMemoryApp:
         self.result_tree.tag_configure("hit", background="#14532d", foreground="white")
 
         self._style_treeview()
+
+        summary_container = tk.Frame(card, bg="#1e293b")
+        summary_container.pack(fill="x", padx=20, pady=(0, 15))
+
+        self.summary_label = tk.Label(
+            summary_container,
+            text="Total References: --  |  Total Faults: --  |  Hit Ratio: --",
+            font=("Inter", 11, "bold"),
+            bg="#1e293b",
+            fg=self.accent_blue,
+            padx=10,
+            pady=10
+        )
+        self.summary_label.pack(side="left")
 
     def _style_treeview(self):
         """Style the Treeview widget."""
@@ -702,7 +772,9 @@ class VirtualMemoryApp:
         if num_frames > 10:
             messagebox.showwarning("Warning", "Large number of frames may affect visualization.")
         
-        frames_snapshots, fault_flags, total_faults = simulate_lru(pages, num_frames)
+        algorithm_name = self.algorithm_dropdown.get()
+        algorithm_func = ALGORITHMS.get(algorithm_name, simulate_lru)
+        frames_snapshots, fault_flags, total_faults = algorithm_func(pages, num_frames)
         self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
 
     def _display_results(self, pages, frame_snapshots, fault_flags, total_faults, num_frames):
@@ -732,6 +804,8 @@ class VirtualMemoryApp:
         
         self.page_faults_label.configure(text=f"Page Faults: {total_faults}")
         self.hit_ratio_label.configure(text=f"Hit Ratio: {hit_ratio:.1f}%")
+        
+        self.summary_label.configure(text=f"Total References: {total_steps}  |  Total Faults: {total_faults}  |  Hit Ratio: {hit_ratio:.1f}%")
 
 
 def main():
