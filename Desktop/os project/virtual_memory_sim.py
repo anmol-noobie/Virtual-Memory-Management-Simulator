@@ -8,6 +8,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import time
 from collections import OrderedDict
+import matplotlib
+matplotlib.use('TkAgg')
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 
 
 def simulate_lru(pages, num_frames):
@@ -368,7 +373,7 @@ class VirtualMemoryApp:
 
         subtitle = tk.Label(
             title_container,
-            text="Interactive Page Replacement Visualization",
+            text="Day 4: added scrollable results table, styled scrollbar, improved layout and UI fixes",
             font=("Inter", 12),
             bg="#0f172a",
             fg=self.text_secondary
@@ -474,16 +479,45 @@ class VirtualMemoryApp:
         content = tk.Frame(self.content_frame, bg="#0f172a")
         self.tab_contents.append(content)
 
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=0)
+        content.grid_columnconfigure(1, weight=1)
+
         left_panel = tk.Frame(content, bg="#0f172a")
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 20))
+        left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 20))
 
         self._create_input_card(left_panel)
         self._create_run_button(left_panel)
 
         right_panel = tk.Frame(content, bg="#0f172a")
-        right_panel.pack(side="right", fill="both", expand=True)
+        right_panel.grid(row=0, column=1, sticky="nsew")
 
-        self._create_output_area(right_panel)
+        scroll_canvas = tk.Canvas(right_panel, bg="#0f172a", highlightthickness=0, width=600)
+        scroll_canvas.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = tk.Scrollbar(right_panel, orient="vertical", command=scroll_canvas.yview)
+        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+        right_panel.grid_rowconfigure(0, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
+
+        vis_container = tk.Frame(scroll_canvas, bg="#0f172a")
+        vis_container_id = scroll_canvas.create_window((0, 0), window=vis_container, anchor="nw")
+
+        def on_configure(event):
+            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
+            scroll_canvas.itemconfig(vis_container_id, width=scroll_canvas.winfo_width())
+
+        scroll_canvas.bind('<Configure>', on_configure)
+        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        self.vis_container = vis_container
+        self.scroll_canvas = scroll_canvas
+        self._create_output_area(vis_container)
+        self._create_fault_graph(vis_container)
 
     def _create_input_card(self, parent):
         """Create input form card."""
@@ -572,16 +606,20 @@ class VirtualMemoryApp:
         self.root.bind("<Return>", lambda e: self._on_run_clicked())
 
     def _create_output_area(self, parent):
-        """Create the output visualization area."""
-        card = ModernCard(parent)
-        card.pack(fill="both", expand=True)
+        """Create the output visualization area with table."""
+        parent.grid_rowconfigure(0, weight=0)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
 
-        card_header = tk.Frame(card, bg="#1e293b")
+        table_section = ModernCard(parent)
+        table_section.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+
+        card_header = tk.Frame(table_section, bg="#1e293b")
         card_header.pack(fill="x", padx=20, pady=(15, 10))
 
         tk.Label(
             card_header,
-            text="Visualization",
+            text="Results Table",
             font=("Inter", 14, "bold"),
             bg="#1e293b",
             fg=self.text_primary
@@ -592,42 +630,62 @@ class VirtualMemoryApp:
 
         self.page_faults_label = tk.Label(
             stats_frame,
-            text="Page Faults: --",
+            text="Faults: --",
             font=("Inter", 10, "bold"),
             bg="#1e293b",
             fg="#ef4444",
-            padx=10
+            padx=8
         )
-        self.page_faults_label.pack(side="left", padx=(0, 10))
+        self.page_faults_label.pack(side="left", padx=(0, 8))
 
         self.hit_ratio_label = tk.Label(
             stats_frame,
-            text="Hit Ratio: --",
+            text="Hit: --",
             font=("Inter", 10, "bold"),
             bg="#1e293b",
             fg="#22c55e"
         )
         self.hit_ratio_label.pack(side="left")
 
-        table_container = tk.Frame(card, bg="#1e293b")
+        table_container = tk.Frame(table_section, bg="#1e293b")
         table_container.pack(fill="both", expand=True, padx=20, pady=(0, 15))
 
-        self.result_tree = ttk.Treeview(table_container, show="headings", style="Modern.Treeview")
-        
-        scrollbar_y = ttk.Scrollbar(table_container, orient="vertical", command=self.result_tree.yview)
-        scrollbar_x = ttk.Scrollbar(table_container, orient="horizontal", command=self.result_tree.xview)
-        self.result_tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        self.table_placeholder = tk.Label(
+            table_container,
+            text="Run a simulation to see results",
+            font=("Inter", 12),
+            bg="#1e293b",
+            fg="#64748b",
+            pady=40
+        )
+        self.table_placeholder.pack(fill="both", expand=True)
+
+        table_inner = tk.Frame(table_container, bg="#1e293b")
+        table_inner.pack(fill="both", expand=True)
+        table_inner.pack_forget()
+
+        scrollbar_y = ttk.Scrollbar(table_inner, orient="vertical")
+        scrollbar_y.pack(side="right", fill="y")
+
+        scrollbar_x = ttk.Scrollbar(table_inner, orient="horizontal")
+        scrollbar_x.pack(side="bottom", fill="x")
+
+        self.result_tree = ttk.Treeview(table_inner, show="headings", style="Modern.Treeview",
+                                        yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        scrollbar_y.configure(command=self.result_tree.yview)
+        scrollbar_x.configure(command=self.result_tree.xview)
 
         self.result_tree.pack(side="left", fill="both", expand=True)
-        scrollbar_y.pack(side="right", fill="y")
-        scrollbar_x.pack(side="bottom", fill="x")
 
         self.result_tree.tag_configure("fault", background="#7f1d1d", foreground="white")
         self.result_tree.tag_configure("hit", background="#14532d", foreground="white")
 
         self._style_treeview()
 
-        summary_container = tk.Frame(card, bg="#1e293b")
+        self.table_container = table_container
+        self.table_inner = table_inner
+
+        summary_container = tk.Frame(table_section, bg="#1e293b")
         summary_container.pack(fill="x", padx=20, pady=(0, 15))
 
         self.summary_label = tk.Label(
@@ -778,7 +836,10 @@ class VirtualMemoryApp:
         self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
 
     def _display_results(self, pages, frame_snapshots, fault_flags, total_faults, num_frames):
-        """Display simulation results in the Treeview table."""
+        """Display simulation results in the Treeview table and update graph."""
+        self.table_placeholder.pack_forget()
+        self.table_inner.pack(fill="both", expand=True)
+        
         for item in self.result_tree.get_children():
             self.result_tree.delete(item)
         
@@ -802,10 +863,103 @@ class VirtualMemoryApp:
         hits = total_steps - total_faults
         hit_ratio = (hits / total_steps * 100) if total_steps > 0 else 0
         
-        self.page_faults_label.configure(text=f"Page Faults: {total_faults}")
-        self.hit_ratio_label.configure(text=f"Hit Ratio: {hit_ratio:.1f}%")
+        self.page_faults_label.configure(text=f"Faults: {total_faults}")
+        self.hit_ratio_label.configure(text=f"Hit: {hit_ratio:.1f}%")
         
         self.summary_label.configure(text=f"Total References: {total_steps}  |  Total Faults: {total_faults}  |  Hit Ratio: {hit_ratio:.1f}%")
+        
+        steps = list(range(1, total_steps + 1))
+        cumulative_faults = []
+        fault_count = 0
+        for is_fault in fault_flags:
+            if is_fault:
+                fault_count += 1
+            cumulative_faults.append(fault_count)
+        
+        self._update_graph(steps, cumulative_faults, fault_flags)
+        
+        self.root.update_idletasks()
+        if hasattr(self, 'scroll_canvas'):
+            self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def _create_fault_graph(self, parent):
+        """Create the embedded Matplotlib graph for page faults."""
+        graph_card = ModernCard(parent)
+        graph_card.grid(row=1, column=0, sticky="nsew", pady=(15, 0))
+
+        card_header = tk.Frame(graph_card, bg="#1e293b")
+        card_header.pack(fill="x", padx=20, pady=(15, 10))
+
+        tk.Label(
+            card_header,
+            text="Page Fault Graph",
+            font=("Inter", 14, "bold"),
+            bg="#1e293b",
+            fg=self.text_primary
+        ).pack(side="left")
+
+        self.fig = Figure(figsize=(8, 5), dpi=100, facecolor='#161b22')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#161b22')
+        
+        plt.style.use('dark_background')
+        
+        self.ax.set_xlabel('Step Number', color='#9ca3af', fontsize=10)
+        self.ax.set_ylabel('Cumulative Page Faults', color='#9ca3af', fontsize=10)
+        self.ax.tick_params(colors='#9ca3af', labelsize=9)
+        
+        self.ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
+        self.ax.spines['bottom'].set_color('#4b5563')
+        self.ax.spines['left'].set_color('#4b5563')
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        
+        self.fig.tight_layout(pad=2.0)
+
+        graph_inner = tk.Frame(graph_card, bg='#161b22')
+        graph_inner.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_inner)
+        self.canvas.get_tk_widget().configure(bg='#161b22')
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        self._update_graph([], [], [])
+
+    def _update_graph(self, steps, cumulative_faults, fault_flags):
+        """Update the page fault graph with new data."""
+        self.ax.clear()
+        self.ax.set_facecolor('#161b22')
+        
+        self.ax.set_xlabel('Step Number', color='#9ca3af', fontsize=10)
+        self.ax.set_ylabel('Cumulative Page Faults', color='#9ca3af', fontsize=10)
+        self.ax.tick_params(colors='#9ca3af', labelsize=9)
+        
+        self.ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
+        self.ax.spines['bottom'].set_color('#4b5563')
+        self.ax.spines['left'].set_color('#4b5563')
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        
+        if len(steps) > 0:
+            self.ax.step(steps, cumulative_faults, where='post', color='#3b82f6', linewidth=2, label='Cumulative Faults')
+            
+            fault_points = [(s, cf) for s, cf, is_fault in zip(steps, cumulative_faults, fault_flags) if is_fault]
+            if fault_points:
+                fx, fy = zip(*fault_points)
+                self.ax.scatter(fx, fy, color='#ef4444', s=60, zorder=5, label='Page Fault', edgecolors='white', linewidths=0.5)
+            
+            self.ax.legend(loc='upper left', fontsize=9, facecolor='#1e293b', edgecolor='#4b5563', labelcolor='#e5e7eb')
+            self.ax.set_xlim(0.5, max(steps) + 0.5)
+            self.ax.set_ylim(-0.2, max(cumulative_faults) + 0.5)
+        else:
+            self.ax.text(0.5, 0.5, 'Run a simulation to see the graph', 
+                        ha='center', va='center', transform=self.ax.transAxes,
+                        color='#64748b', fontsize=14, style='italic')
+            self.ax.set_xlim(0, 1)
+            self.ax.set_ylim(0, 1)
+            self.ax.axis('off')
+        self.fig.tight_layout(pad=2.0)
+        self.canvas.draw()
 
 
 def main():
