@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 import matplotlib.pyplot as plt
 
 
@@ -112,6 +113,56 @@ ALGORITHMS = {
     "LRU": simulate_lru,
     "Optimal": simulate_optimal
 }
+
+
+def simulate_segmentation(segments, total_memory=512):
+    """
+    Simulate segmentation memory allocation.
+    
+    Args:
+        segments: List of (name, size) tuples where size is in KB
+        total_memory: Total memory size in KB (default 512 KB)
+        
+    Returns:
+        tuple: (allocations, stats)
+            - allocations: list of dicts with segment info and allocation status
+            - stats: dict with used_memory, free_memory, external_fragmentation
+    """
+    allocations = []
+    current_address = 0
+    
+    for name, size in segments:
+        if current_address + size <= total_memory:
+            allocation = {
+                'name': name,
+                'size': size,
+                'base_address': current_address,
+                'end_address': current_address + size,
+                'status': 'Allocated'
+            }
+            current_address += size
+        else:
+            allocation = {
+                'name': name,
+                'size': size,
+                'base_address': '-',
+                'end_address': '-',
+                'status': 'Allocation Failed'
+            }
+        allocations.append(allocation)
+    
+    used_memory = sum(a['size'] for a in allocations if a['status'] == 'Allocated')
+    free_memory = total_memory - used_memory
+    external_fragmentation = free_memory
+    
+    stats = {
+        'total_memory': total_memory,
+        'used_memory': used_memory,
+        'free_memory': free_memory,
+        'external_fragmentation': external_fragmentation
+    }
+    
+    return allocations, stats
 
 
 def parse_page_reference(page_str):
@@ -373,7 +424,7 @@ class VirtualMemoryApp:
 
         subtitle = tk.Label(
             title_container,
-            text="Day 4: added scrollable results table, styled scrollbar, improved layout and UI fixes",
+            text="Day 5: Added Segmentation & Fragmentation tab with memory allocation simulation and visualization",
             font=("Inter", 12),
             bg="#0f172a",
             fg=self.text_secondary
@@ -718,46 +769,545 @@ class VirtualMemoryApp:
         style.map("Modern.Treeview", background=[("selected", "#3b82f6")])
 
     def _create_segmentation_tab(self):
-        """Create the Segmentation tab content."""
+        """Create the Segmentation tab content with scrollable canvas."""
         content = tk.Frame(self.content_frame, bg="#0f172a")
         self.tab_contents.append(content)
 
-        card = ModernCard(content)
-        card.pack(fill="both", expand=True, padx=20, pady=20)
+        scroll_canvas = tk.Canvas(content, bg="#0f172a", highlightthickness=0)
+        scrollbar = tk.Scrollbar(content, orient="vertical", command=scroll_canvas.yview)
+        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
+        scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        scroll_canvas.pack(side="left", fill="both", expand=True)
+
+        inner_frame = tk.Frame(scroll_canvas, bg="#0f172a")
+        inner_window = scroll_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+
+        def on_configure(event):
+            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
+            scroll_canvas.itemconfig(inner_window, width=scroll_canvas.winfo_width())
+
+        scroll_canvas.bind('<Configure>', on_configure)
+        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=1)
+
+        inner_frame.grid_rowconfigure(0, weight=0)
+        inner_frame.grid_rowconfigure(1, weight=0)
+        inner_frame.grid_columnconfigure(0, weight=0, minsize=350)
+        inner_frame.grid_columnconfigure(1, weight=1)
+
+        left_panel = tk.Frame(inner_frame, bg="#0f172a")
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 20), pady=(0, 15))
+
+        self._create_segment_input_card(left_panel)
+
+        right_panel = tk.Frame(inner_frame, bg="#0f172a")
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 0), pady=(0, 15))
+
+        self._create_segment_results_card(right_panel)
+
+        bottom_panel = tk.Frame(inner_frame, bg="#0f172a")
+        bottom_panel.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(0, 0), pady=(0, 15))
+
+        self._create_segment_memory_diagram(bottom_panel)
+
+    def _create_segment_input_card(self, parent):
+        """Create input form card for segmentation."""
+        card = ModernCard(parent)
+        card.pack(fill="both", expand=True, pady=(0, 15))
 
         card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=25, pady=(20, 15))
+        card_header.pack(fill="x", padx=15, pady=(10, 5))
 
         tk.Label(
             card_header,
-            text="Segmentation & Fragmentation",
-            font=("Inter", 18, "bold"),
+            text="Add Segments",
+            font=("Inter", 12, "bold"),
             bg="#1e293b",
             fg=self.text_primary
         ).pack(side="left")
 
         tk.Label(
             card_header,
-            text="Coming Soon",
-            font=("Inter", 10, "bold"),
-            bg="#8b5cf6",
-            fg="white",
-            padx=12,
-            pady=4
+            text="●",
+            font=("Inter", 9),
+            bg="#1e293b",
+            fg="#22c55e"
         ).pack(side="right")
 
-        placeholder = tk.Label(
-            card,
-            text="🔧  This module is under development.\n\nFeatures planned:\n• Segmentation with variable-sized segments\n• Internal and external fragmentation visualization\n• Memory allocation algorithms\n• Fragmentation metrics",
+        input_container = tk.Frame(card, bg="#1e293b")
+        input_container.pack(fill="x", padx=15, pady=(0, 8))
+
+        tk.Label(
+            input_container,
+            text="Segment Name",
+            font=("Inter", 9, "bold"),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).grid(row=0, column=0, sticky="w", pady=(5, 2))
+
+        seg_name_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
+        seg_name_frame.grid(row=1, column=0, sticky="ew", pady=(0, 6), columnspan=2)
+        self.seg_name_entry = tk.Entry(seg_name_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
+                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
+        self.seg_name_entry.pack(fill="x", padx=10, pady=6)
+        self.seg_name_entry.insert(0, "e.g. Code, Data, Stack")
+        self.seg_name_entry.bind("<FocusIn>", lambda e, w=self.seg_name_entry, p="e.g. Code, Data, Stack": self._on_entry_focus_in(w, p))
+        self.seg_name_entry.bind("<FocusOut>", lambda e, w=self.seg_name_entry, p="e.g. Code, Data, Stack": self._on_entry_focus_out(w, p))
+
+        tk.Label(
+            input_container,
+            text="Segment Size (KB)",
+            font=("Inter", 9, "bold"),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).grid(row=2, column=0, sticky="w", pady=(0, 2))
+
+        seg_size_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
+        seg_size_frame.grid(row=3, column=0, sticky="ew", pady=(0, 6), columnspan=2)
+        self.seg_size_entry = tk.Entry(seg_size_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
+                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
+        self.seg_size_entry.pack(fill="x", padx=10, pady=6)
+        self.seg_size_entry.insert(0, "e.g. 100")
+        self.seg_size_entry.bind("<FocusIn>", lambda e, w=self.seg_size_entry, p="e.g. 100": self._on_entry_focus_in(w, p))
+        self.seg_size_entry.bind("<FocusOut>", lambda e, w=self.seg_size_entry, p="e.g. 100": self._on_entry_focus_out(w, p))
+
+        tk.Label(
+            input_container,
+            text="Total Memory (KB)",
+            font=("Inter", 9, "bold"),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).grid(row=4, column=0, sticky="w", pady=(0, 2))
+
+        total_mem_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
+        total_mem_frame.grid(row=5, column=0, sticky="ew", pady=(0, 8), columnspan=2)
+        self.total_mem_entry = tk.Entry(total_mem_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
+                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
+        self.total_mem_entry.pack(fill="x", padx=10, pady=6)
+        self.total_mem_entry.insert(0, "e.g. 512")
+        self.total_mem_entry.bind("<FocusIn>", lambda e, w=self.total_mem_entry, p="e.g. 512": self._on_entry_focus_in(w, p))
+        self.total_mem_entry.bind("<FocusOut>", lambda e, w=self.total_mem_entry, p="e.g. 512": self._on_entry_focus_out(w, p))
+
+        input_container.columnconfigure(0, weight=1)
+
+        btn_container = tk.Frame(card, bg="#1e293b")
+        btn_container.pack(fill="x", padx=15, pady=(0, 8))
+
+        self.add_seg_button = AnimatedButton(
+            btn_container,
+            text="+ Add Segment",
+            command=self._on_add_segment,
+            width=140,
+            height=36
+        )
+        self.add_seg_button.pack(fill="x", expand=True)
+
+        self.run_seg_button = AnimatedButton(
+            btn_container,
+            text="Run Segmentation",
+            command=self._on_run_segmentation,
+            width=140,
+            height=36
+        )
+        self.run_seg_button.pack(fill="x", expand=True, pady=(5, 0))
+
+        self.clear_seg_button = AnimatedButton(
+            btn_container,
+            text="Clear All",
+            command=self._on_clear_segments,
+            width=140,
+            height=36
+        )
+        self.clear_seg_button.pack(fill="x", expand=True, pady=(5, 0))
+
+        list_card = tk.Frame(card, bg="#1e293b")
+        list_card.pack(fill="x", padx=15, pady=(0, 10))
+
+        list_header = tk.Frame(list_card, bg="#1f2937")
+        list_header.pack(fill="x", padx=10, pady=(8, 3))
+
+        tk.Label(
+            list_header,
+            text="Segments List",
+            font=("Inter", 10, "bold"),
+            bg="#1f2937",
+            fg=self.text_primary
+        ).pack(side="left")
+
+        self.seg_count_label = tk.Label(
+            list_header,
+            text="0 segments",
+            font=("Inter", 9),
+            bg="#1f2937",
+            fg=self.text_secondary
+        )
+        self.seg_count_label.pack(side="right")
+
+        list_container = tk.Frame(list_card, bg="#1f2937")
+        list_container.pack(fill="x", padx=10, pady=(0, 8))
+
+        self.scrollbar_y = ttk.Scrollbar(list_container, orient="vertical")
+        self.scrollbar_y.pack(side="right", fill="y")
+
+        self.seg_listbox = tk.Listbox(
+            list_container,
+            font=("Inter", 10),
+            bg="#1f2937",
+            fg=self.text_primary,
+            highlightthickness=0,
+            bd=0,
+            selectbackground="#3b82f6",
+            selectforeground="white",
+            activestyle="none",
+            yscrollcommand=self.scrollbar_y.set,
+            height=5
+        )
+        self.scrollbar_y.configure(command=self.seg_listbox.yview)
+        self.seg_listbox.pack(side="left", fill="both", expand=True)
+        self.scrollbar_y.pack_forget()
+
+        self.segments = []
+
+    def _create_segment_results_card(self, parent):
+        """Create results card for segmentation."""
+        card = ModernCard(parent)
+        card.pack(fill="both", expand=True)
+
+        card_header = tk.Frame(card, bg="#1e293b")
+        card_header.pack(fill="x", padx=20, pady=(15, 10))
+
+        tk.Label(
+            card_header,
+            text="Allocation Results",
+            font=("Inter", 14, "bold"),
+            bg="#1e293b",
+            fg=self.text_primary
+        ).pack(side="left")
+
+        self.seg_status_label = tk.Label(
+            card_header,
+            text="Add segments and run",
+            font=("Inter", 10),
+            bg="#1e293b",
+            fg=self.text_secondary
+        )
+        self.seg_status_label.pack(side="right")
+
+        stats_frame = tk.Frame(card, bg="#1e293b")
+        stats_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        self.seg_used_label = tk.Label(
+            stats_frame,
+            text="Used: -- KB",
+            font=("Inter", 11, "bold"),
+            bg="#1e293b",
+            fg="#22c55e",
+            padx=12,
+            pady=8
+        )
+        self.seg_used_label.pack(side="left", padx=(0, 8))
+
+        self.seg_free_label = tk.Label(
+            stats_frame,
+            text="Free: -- KB",
+            font=("Inter", 11, "bold"),
+            bg="#1e293b",
+            fg="#f59e0b",
+            padx=12,
+            pady=8
+        )
+        self.seg_free_label.pack(side="left", padx=(0, 8))
+
+        self.seg_frag_label = tk.Label(
+            stats_frame,
+            text="Fragmentation: -- KB",
+            font=("Inter", 11, "bold"),
+            bg="#1e293b",
+            fg="#ef4444",
+            padx=12,
+            pady=8
+        )
+        self.seg_frag_label.pack(side="left")
+
+        table_container = tk.Frame(card, bg="#1e293b")
+        table_container.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        self.seg_table_placeholder = tk.Label(
+            table_container,
+            text="Run segmentation to see allocation results",
             font=("Inter", 12),
             bg="#1e293b",
-            fg=self.text_secondary,
-            justify="left",
-            anchor="nw",
-            padx=25,
-            pady=20
+            fg="#64748b",
+            pady=40
         )
-        placeholder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.seg_table_placeholder.pack(fill="both", expand=True)
+
+        seg_table_inner = tk.Frame(table_container, bg="#1e293b")
+        seg_table_inner.pack(fill="both", expand=True)
+        seg_table_inner.pack_forget()
+
+        scrollbar_y = ttk.Scrollbar(seg_table_inner, orient="vertical")
+        scrollbar_y.pack(side="right", fill="y")
+
+        scrollbar_x = ttk.Scrollbar(seg_table_inner, orient="horizontal")
+        scrollbar_x.pack(side="bottom", fill="x")
+
+        self.seg_result_tree = ttk.Treeview(seg_table_inner, show="headings", style="Modern.Treeview",
+                                            yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        scrollbar_y.configure(command=self.seg_result_tree.yview)
+        scrollbar_x.configure(command=self.seg_result_tree.xview)
+
+        self.seg_result_tree.pack(side="left", fill="both", expand=True)
+
+        self.seg_result_tree.tag_configure("allocated", background="#14532d", foreground="white")
+        self.seg_result_tree.tag_configure("failed", background="#7f1d1d", foreground="white")
+
+        self.seg_table_container = table_container
+        self.seg_table_inner = seg_table_inner
+
+    def _create_segment_memory_diagram(self, parent):
+        """Create the memory diagram card with Matplotlib."""
+        card = ModernCard(parent)
+        card.pack(fill="both", expand=True)
+
+        card_header = tk.Frame(card, bg="#1e293b")
+        card_header.pack(fill="x", padx=20, pady=(15, 10))
+
+        tk.Label(
+            card_header,
+            text="Memory Visualization",
+            font=("Inter", 12, "bold"),
+            bg="#1e293b",
+            fg=self.text_primary
+        ).pack(side="left")
+
+        self.seg_fig = Figure(figsize=(9, 3), dpi=100, facecolor='#161b22')
+        self.seg_ax = self.seg_fig.add_subplot(111)
+        self.seg_ax.set_facecolor('#161b22')
+
+        graph_inner = tk.Frame(card, bg='#161b22')
+        graph_inner.pack(fill="x", padx=15, pady=(0, 10))
+
+        self.seg_canvas = FigureCanvasTkAgg(self.seg_fig, master=graph_inner)
+        self.seg_canvas.get_tk_widget().configure(bg='#161b22')
+        self.seg_canvas.get_tk_widget().pack(fill="x")
+
+        self._update_segment_diagram([], 512)
+
+    def _on_entry_focus_in(self, widget, placeholder):
+        """Handle entry focus in - clear placeholder."""
+        if widget.get() == placeholder:
+            widget.delete(0, tk.END)
+            widget.configure(fg="#ffffff")
+
+    def _on_entry_focus_out(self, widget, placeholder):
+        """Handle entry focus out - restore placeholder."""
+        if widget.get() == "":
+            widget.insert(0, placeholder)
+            widget.configure(fg="#6e7681")
+
+    def _on_add_segment(self):
+        """Handle Add Segment button click."""
+        name = self.seg_name_entry.get().strip()
+        size_str = self.seg_size_entry.get().strip()
+
+        if not name or name == "e.g. Code, Data, Stack":
+            messagebox.showerror("Input Error", "Please enter a segment name.")
+            return
+
+        try:
+            size = int(size_str)
+            if size <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Input Error", "Segment size must be a positive integer.")
+            return
+
+        self.segments.append((name, size))
+        self.seg_listbox.insert(tk.END, f"{name} ({size} KB)")
+        self.seg_count_label.configure(text=f"{len(self.segments)} segments")
+        self._update_seg_scrollbar()
+
+        self._reset_entry(self.seg_name_entry, "e.g. Code, Data, Stack")
+        self._reset_entry(self.seg_size_entry, "e.g. 100")
+        self.seg_name_entry.focus()
+
+    def _reset_entry(self, entry, placeholder):
+        """Reset entry to placeholder style."""
+        entry.delete(0, tk.END)
+        entry.insert(0, placeholder)
+        entry.configure(fg="#6e7681")
+
+    def _update_seg_scrollbar(self):
+        """Show or hide scrollbar based on list size."""
+        if len(self.segments) > self.seg_listbox.cget('height'):
+            self.scrollbar_y.pack(side="right", fill="y")
+        else:
+            self.scrollbar_y.pack_forget()
+
+    def _on_clear_segments(self):
+        """Handle Clear All button click."""
+        self.segments = []
+        self.seg_listbox.delete(0, tk.END)
+        self.seg_count_label.configure(text="0 segments")
+        self._update_seg_scrollbar()
+        self.seg_status_label.configure(text="Add segments and run")
+        self.seg_used_label.configure(text="Used: -- KB")
+        self.seg_free_label.configure(text="Free: -- KB")
+        self.seg_frag_label.configure(text="Fragmentation: -- KB")
+
+        self.seg_table_placeholder.pack(fill="both", expand=True)
+        self.seg_table_inner.pack_forget()
+
+        self._update_segment_diagram([], 512)
+
+    def _on_run_segmentation(self):
+        """Handle Run Segmentation button click."""
+        if not self.segments:
+            messagebox.showerror("Input Error", "Please add at least one segment.")
+            return
+
+        total_mem_str = self.total_mem_entry.get().strip()
+        if not total_mem_str or total_mem_str == "e.g. 512":
+            total_mem = 512
+        else:
+            try:
+                total_mem = int(total_mem_str)
+                if total_mem <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Input Error", "Total memory must be a positive integer.")
+                return
+
+        allocations, stats = simulate_segmentation(self.segments, total_mem)
+
+        self._display_segment_results(allocations, stats)
+        self._update_segment_diagram(allocations, total_mem)
+
+    def _display_segment_results(self, allocations, stats):
+        """Display segmentation results in the Treeview table."""
+        self.seg_table_placeholder.pack_forget()
+        self.seg_table_inner.pack(fill="both", expand=True)
+
+        for item in self.seg_result_tree.get_children():
+            self.seg_result_tree.delete(item)
+
+        columns = ["Segment", "Base Address", "Size (KB)", "End Address", "Status"]
+        self.seg_result_tree["columns"] = columns
+        self.seg_result_tree["show"] = "headings"
+
+        for col in columns:
+            self.seg_result_tree.heading(col, text=col)
+            self.seg_result_tree.column(col, width=120, anchor="center")
+
+        failed_count = 0
+        for alloc in allocations:
+            row_values = [
+                alloc['name'],
+                str(alloc['base_address']),
+                str(alloc['size']),
+                str(alloc['end_address']),
+                alloc['status']
+            ]
+            tag = "failed" if alloc['status'] == 'Allocation Failed' else "allocated"
+            self.seg_result_tree.insert("", "end", values=row_values, tags=(tag,))
+            if alloc['status'] == 'Allocation Failed':
+                failed_count += 1
+
+        self.seg_used_label.configure(text=f"Used: {stats['used_memory']} KB")
+        self.seg_free_label.configure(text=f"Free: {stats['free_memory']} KB")
+        self.seg_frag_label.configure(text=f"Fragmentation: {stats['external_fragmentation']} KB")
+
+        if failed_count > 0:
+            self.seg_status_label.configure(text=f"{failed_count} failed", fg="#ef4444")
+        else:
+            self.seg_status_label.configure(text="All allocated", fg="#22c55e")
+
+    def _update_segment_diagram(self, allocations, total_memory):
+        """Update the memory visualization diagram."""
+        self.seg_ax.clear()
+        self.seg_ax.set_facecolor('#161b22')
+
+        colors = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ef4444', 
+                  '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1']
+        
+        if not allocations:
+            self.seg_ax.text(0.5, 0.5, 'Add segments to visualize memory allocation', 
+                            ha='center', va='center', transform=self.seg_ax.transAxes,
+                            color='#64748b', fontsize=12, style='italic')
+            self.seg_ax.set_xlim(0, 1)
+            self.seg_ax.set_ylim(0, 1)
+            self.seg_ax.axis('off')
+            self.seg_ax.set_title('Memory Block Diagram', color='#9ca3af', fontsize=12, pad=10)
+        else:
+            blocks = []
+            current_addr = 0
+            color_idx = 0
+
+            for alloc in allocations:
+                if alloc['status'] == 'Allocated':
+                    blocks.append({
+                        'name': alloc['name'],
+                        'start': current_addr,
+                        'size': alloc['size'],
+                        'color': colors[color_idx % len(colors)]
+                    })
+                    current_addr += alloc['size']
+                    color_idx += 1
+
+            free_start = current_addr
+            free_size = total_memory - current_addr
+
+            y_pos = 0.5
+            bar_height = 0.6
+
+            for i, block in enumerate(blocks):
+                width = block['size']
+                rect = Rectangle((block['start'], y_pos), width, bar_height,
+                                 facecolor=block['color'], edgecolor='white',
+                                 linewidth=1, alpha=0.9)
+                self.seg_ax.add_patch(rect)
+                
+                if width >= 15:
+                    self.seg_ax.text(block['start'] + width/2, y_pos + bar_height/2,
+                                   f"{block['name']}\n{width} KB",
+                                   ha='center', va='center', fontsize=9,
+                                   color='white', fontweight='bold')
+                elif width >= 5:
+                    self.seg_ax.text(block['start'] + width/2, y_pos + bar_height/2,
+                                   block['name'], ha='center', va='center',
+                                   fontsize=8, color='white', fontweight='bold')
+
+            if free_size > 0:
+                rect = Rectangle((free_start, y_pos), free_size, bar_height,
+                                     facecolor='#6b7280', edgecolor='white',
+                                     linewidth=1, alpha=0.5, hatch='///')
+                self.seg_ax.add_patch(rect)
+                if free_size >= 15:
+                    self.seg_ax.text(free_start + free_size/2, y_pos + bar_height/2,
+                                   f"FREE\n{free_size} KB", ha='center', va='center',
+                                   fontsize=9, color='#d1d5db', style='italic')
+
+            self.seg_ax.set_xlim(-5, total_memory + 10)
+            self.seg_ax.set_ylim(0, 1)
+            self.seg_ax.axis('off')
+            
+            self.seg_ax.set_title('Memory Block Diagram', color='#9ca3af', fontsize=12, pad=10)
+            
+            for i in range(0, total_memory + 1, 64):
+                self.seg_ax.axvline(x=i, color='#4b5563', linestyle='--', linewidth=0.5, alpha=0.5)
+                self.seg_ax.text(i, y_pos - 0.15, str(i), ha='center', va='top',
+                                fontsize=8, color='#9ca3af')
+
+            self.seg_ax.text(total_memory + 5, y_pos + bar_height/2, f'{total_memory} KB',
+                            ha='left', va='center', fontsize=8, color='#9ca3af')
+
+        self.seg_fig.tight_layout(pad=2.0)
+        self.seg_canvas.draw()
 
     def _create_comparison_tab(self):
         """Create the LRU vs Optimal comparison tab content."""
