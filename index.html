@@ -502,6 +502,20 @@
             border-radius: 2px;
         }
 
+        .status-bar {
+            background: #161b22;
+            border-top: 1px solid #30363d;
+            padding: 8px 20px;
+            font-size: 12px;
+            color: #8b949e;
+            display: flex;
+            align-items: center;
+        }
+
+        .status-bar .status-text {
+            flex: 1;
+        }
+
         @media (max-width: 768px) {
             .grid-2, .grid-3 {
                 grid-template-columns: 1fr;
@@ -569,6 +583,13 @@
                             <button class="btn btn-primary" style="margin-top: 16px; width: 100%;" onclick="runSimulation()">
                                 Run Simulation
                             </button>
+                            <button class="btn btn-secondary" style="margin-top: 8px; width: 100%;" onclick="resetPaging()">
+                                Reset / Clear
+                            </button>
+                            <div style="margin-top: 12px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                                <strong>LRU:</strong> Replaces least recently used page<br>
+                                <strong>Optimal:</strong> Replaces page used farthest in future
+                            </div>
                         </div>
                     </div>
 
@@ -663,6 +684,9 @@
                                 <div class="empty-state" style="padding: 20px;">No segments added</div>
                             </div>
                         </div>
+                        <div style="padding: 8px 12px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                            <strong>External fragmentation:</strong> Free memory that cannot be used to satisfy a request due to being split into small non-contiguous blocks.
+                        </div>
                     </div>
                 </div>
 
@@ -735,8 +759,8 @@
                     <button class="btn btn-primary" style="margin-top: 16px;" onclick="runComparison()">
                         Compare Algorithms
                     </button>
-                    <button class="btn btn-secondary" style="margin-top: 16px; margin-left: 8px;" onclick="testLRU()">
-                        Test LRU
+                    <button class="btn btn-secondary" style="margin-top: 16px; margin-left: 8px;" onclick="resetComparison()">
+                        Reset
                     </button>
                 </div>
             </div>
@@ -811,9 +835,19 @@
         </div>
     </div>
 
+    <div class="status-bar">
+        <span class="status-text" id="statusText">Ready</span>
+    </div>
+
     <script>
         // Global state
         let segments = [];
+        let simulationRunning = false;
+
+        // Status bar update
+        function updateStatus(message) {
+            document.getElementById('statusText').textContent = message;
+        }
 
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -961,22 +995,55 @@
 
         // Run paging simulation
         function runSimulation() {
-            const pageRef = document.getElementById('pageRef').value;
+            const pageRef = document.getElementById('pageRef').value.trim();
             const numFrames = parseInt(document.getElementById('numFrames').value);
             const algorithm = document.getElementById('algorithm').value;
 
-            const pages = parsePageRef(pageRef);
-            if (!pages) {
-                alert('Please enter a valid page reference string');
-                return;
-            }
-            if (!numFrames || numFrames < 1) {
-                alert('Please enter a valid number of frames');
+            if (!pageRef) {
+                alert('Input Error: Please enter a page reference string.');
                 return;
             }
 
-            const result = algorithm === 'lru' ? simulateLRU(pages, numFrames) : simulateOptimal(pages, numFrames);
-            displayResults(pages, result, numFrames);
+            const pages = parsePageRef(pageRef);
+            if (!pages || pages.length === 0) {
+                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
+                return;
+            }
+
+            if (!numFrames || numFrames < 1) {
+                alert('Input Error: Number of frames must be a positive integer (at least 1).');
+                return;
+            }
+
+            const runBtn = document.querySelector('#paging .btn-primary');
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            updateStatus('Running simulation...');
+
+            setTimeout(() => {
+                try {
+                    const result = algorithm === 'lru' ? simulateLRU(pages, numFrames) : simulateOptimal(pages, numFrames);
+                    displayResults(pages, result, numFrames);
+                    updateStatus(`Simulation complete: ${algorithm.toUpperCase()} algorithm with ${result.totalFaults} page faults`);
+                } catch (e) {
+                    alert('Error: Simulation failed - ' + e.message);
+                    updateStatus('Simulation failed');
+                } finally {
+                    runBtn.disabled = false;
+                    runBtn.textContent = 'Run Simulation';
+                }
+            }, 50);
+        }
+
+        // Reset paging tab
+        function resetPaging() {
+            document.getElementById('pageRef').value = '';
+            document.getElementById('numFrames').value = '';
+            document.getElementById('algorithm').selectedIndex = 0;
+            document.getElementById('pagingStats').style.display = 'none';
+            document.getElementById('resultsTable').innerHTML = '<div class="empty-state">Run a simulation to see results</div>';
+            drawFaultChart([], []);
+            updateStatus('Paging tab reset');
         }
 
         // Display paging results
@@ -1166,14 +1233,16 @@
         // Add segment
         function addSegment() {
             const name = document.getElementById('segName').value.trim();
-            const size = parseInt(document.getElementById('segSize').value);
+            const sizeStr = document.getElementById('segSize').value.trim();
 
             if (!name) {
-                alert('Please enter a segment name');
+                alert('Input Error: Please enter a segment name.');
                 return;
             }
+            
+            const size = parseInt(sizeStr);
             if (!size || size < 1) {
-                alert('Please enter a valid segment size');
+                alert('Input Error: Segment size must be a positive integer (at least 1 KB).');
                 return;
             }
 
@@ -1182,6 +1251,7 @@
             document.getElementById('segName').value = '';
             document.getElementById('segSize').value = '';
             document.getElementById('segName').focus();
+            updateStatus(`Added segment: ${name} (${size} KB)`);
         }
 
         // Update segment list UI
@@ -1218,13 +1288,35 @@
         // Run segmentation
         function runSegmentation() {
             if (segments.length === 0) {
-                alert('Please add at least one segment');
+                alert('Input Error: Please add at least one segment.');
                 return;
             }
 
-            const totalMem = parseInt(document.getElementById('totalMem').value) || 512;
-            const allocations = simulateSegmentation(segments, totalMem);
-            displaySegResults(allocations, totalMem);
+            const totalMemStr = document.getElementById('totalMem').value.trim();
+            const totalMem = totalMemStr ? parseInt(totalMemStr) : 512;
+            
+            if (!totalMem || totalMem < 1) {
+                alert('Input Error: Total memory must be a positive integer (at least 1).');
+                return;
+            }
+
+            const runBtn = document.querySelector('#segmentation .btn-primary');
+            runBtn.disabled = true;
+            updateStatus('Running segmentation...');
+
+            setTimeout(() => {
+                try {
+                    const allocations = simulateSegmentation(segments, totalMem);
+                    displaySegResults(allocations, totalMem);
+                    const failedCount = allocations.filter(a => a.status === 'Failed').length;
+                    updateStatus(`Segmentation complete: ${allocations.length} segments processed, ${failedCount} failed`);
+                } catch (e) {
+                    alert('Error: Segmentation failed - ' + e.message);
+                    updateStatus('Segmentation failed');
+                } finally {
+                    runBtn.disabled = false;
+                }
+            }, 50);
         }
 
         // Simulate segmentation
@@ -1348,23 +1440,61 @@
 
         // Run comparison
         function runComparison() {
-            const pageRef = document.getElementById('compPageRef').value;
+            const pageRef = document.getElementById('compPageRef').value.trim();
             const numFrames = parseInt(document.getElementById('compFrames').value);
 
+            if (!pageRef) {
+                alert('Input Error: Please enter a page reference string.');
+                return;
+            }
+
             const pages = parsePageRef(pageRef);
-            if (!pages) {
-                alert('Please enter a valid page reference string');
+            if (!pages || pages.length === 0) {
+                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
                 return;
             }
+
             if (!numFrames || numFrames < 1) {
-                alert('Please enter a valid number of frames');
+                alert('Input Error: Number of frames must be a positive integer (at least 1).');
                 return;
             }
 
-            const lruResult = simulateLRU(pages, numFrames);
-            const optResult = simulateOptimal(pages, numFrames);
+            const compareBtn = document.querySelector('#comparison .btn-primary');
+            compareBtn.disabled = true;
+            compareBtn.textContent = 'Comparing...';
+            updateStatus('Running comparison...');
 
-            displayComparison(pages, lruResult, optResult, numFrames);
+            setTimeout(() => {
+                try {
+                    const lruResult = simulateLRU(pages, numFrames);
+                    const optResult = simulateOptimal(pages, numFrames);
+                    displayComparison(pages, lruResult, optResult, numFrames);
+                    updateStatus(`Comparison complete: LRU=${lruResult.totalFaults} faults, Optimal=${optResult.totalFaults} faults`);
+                } catch (e) {
+                    alert('Error: Comparison failed - ' + e.message);
+                    updateStatus('Comparison failed');
+                } finally {
+                    compareBtn.disabled = false;
+                    compareBtn.textContent = 'Compare Algorithms';
+                }
+            }, 50);
+        }
+
+        // Reset comparison tab
+        function resetComparison() {
+            document.getElementById('compPageRef').value = '';
+            document.getElementById('compFrames').value = '';
+            document.getElementById('compLruFaults').textContent = '--';
+            document.getElementById('compLruHit').textContent = '--';
+            document.getElementById('compLruEff').textContent = '--';
+            document.getElementById('compOptFaults').textContent = '--';
+            document.getElementById('compOptHit').textContent = '--';
+            document.getElementById('compOptEff').textContent = '--';
+            document.getElementById('analysisBox').textContent = 'Run a comparison to see analysis';
+            document.getElementById('analysisBox').className = 'analysis-box';
+            document.getElementById('compTable').innerHTML = '<div class="empty-state">Run a comparison to see step-by-step execution</div>';
+            drawCompChart(0, 0);
+            updateStatus('Comparison tab reset');
         }
 
         // Display comparison results
@@ -1566,6 +1696,7 @@
 
         // Initialize memory diagram
         drawMemoryDiagram([]);
+        updateStatus('Ready - Select a tab to begin');
     </script>
 </body>
 </html>
