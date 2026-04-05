@@ -13,6 +13,7 @@ matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle
 import matplotlib.pyplot as plt
 
 
@@ -397,7 +398,10 @@ class VirtualMemoryApp:
         self.card_bg = "#1e293b"
         self.card_border = "#334155"
 
+        self.last_action = "Application started"
+        
         self._create_ui()
+        self._update_status_bar()
 
     def _create_ui(self):
         """Create the main UI structure."""
@@ -469,6 +473,29 @@ class VirtualMemoryApp:
         self._create_comparison_tab()
 
         self._show_tab(0)
+        self._create_status_bar()
+
+    def _create_status_bar(self):
+        """Create a status bar at the bottom of the window."""
+        self.status_bar = tk.Frame(self.root, bg="#1e293b", height=30)
+        self.status_bar.pack(fill="x", side="bottom")
+        
+        self.status_label = tk.Label(
+            self.status_bar,
+            text=self.last_action,
+            font=("Inter", 10),
+            bg="#1e293b",
+            fg=self.text_secondary,
+            anchor="w",
+            padx=15
+        )
+        self.status_label.pack(side="left", fill="x", expand=True)
+
+    def _update_status_bar(self, message=None):
+        """Update the status bar with a new message."""
+        if message:
+            self.last_action = message
+        self.status_label.configure(text=self.last_action)
 
     def _create_tab_button(self, parent, text, icon, index):
         """Create a modern tab button with hover effects."""
@@ -630,6 +657,16 @@ class VirtualMemoryApp:
         self.algorithm_dropdown = ModernDropdown(input_container, values=["LRU", "Optimal"], width=45)
         self.algorithm_dropdown.grid(row=5, column=0, sticky="ew", pady=(0, 10), columnspan=2)
 
+        info_label = tk.Label(
+            input_container,
+            text="LRU: Replaces least recently used page\nOptimal: Replaces page used farthest in future",
+            font=("Inter", 8),
+            bg="#1e293b",
+            fg="#64748b",
+            justify="left"
+        )
+        info_label.grid(row=6, column=0, sticky="w", columnspan=2)
+
         input_container.columnconfigure(0, weight=1)
 
     def _create_run_button(self, parent):
@@ -653,6 +690,18 @@ class VirtualMemoryApp:
             bg="#0f172a",
             fg=self.text_secondary
         ).pack(side="left", padx=(12, 0), pady=(0, 0))
+
+        reset_btn = tk.Frame(parent, bg="#0f172a")
+        reset_btn.pack(fill="x", pady=(10, 0))
+        
+        self.reset_button = AnimatedButton(
+            reset_btn,
+            text="↺  Reset / Clear",
+            command=self._on_reset_paging,
+            width=200,
+            height=40
+        )
+        self.reset_button.pack(side="left")
 
         self.root.bind("<Return>", lambda e: self._on_run_clicked())
 
@@ -969,6 +1018,16 @@ class VirtualMemoryApp:
         self.scrollbar_y.configure(command=self.seg_listbox.yview)
         self.seg_listbox.pack(side="left", fill="both", expand=True)
         self.scrollbar_y.pack_forget()
+
+        info_label = tk.Label(
+            list_card,
+            text="External fragmentation: free memory that cannot\nbe used to satisfy a request due to being\nsplit into small non-contiguous blocks",
+            font=("Inter", 8),
+            bg="#1e293b",
+            fg="#64748b",
+            justify="left"
+        )
+        info_label.pack(fill="x", padx=10, pady=(0, 8))
 
         self.segments = []
 
@@ -1314,11 +1373,32 @@ class VirtualMemoryApp:
         content = tk.Frame(self.content_frame, bg="#0f172a")
         self.tab_contents.append(content)
 
-        card = ModernCard(content)
-        card.pack(fill="both", expand=True, padx=20, pady=20)
+        scroll_canvas = tk.Canvas(content, bg="#0f172a", highlightthickness=0)
+        scrollbar = tk.Scrollbar(content, orient="vertical", command=scroll_canvas.yview)
+        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
+        scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        scroll_canvas.pack(side="left", fill="both", expand=True)
+
+        inner_frame = tk.Frame(scroll_canvas, bg="#0f172a")
+        inner_window = scroll_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+
+        def on_configure(event):
+            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
+            scroll_canvas.itemconfig(inner_window, width=scroll_canvas.winfo_width())
+
+        scroll_canvas.bind('<Configure>', on_configure)
+        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=1)
+
+        card = ModernCard(inner_frame)
+        card.pack(fill="x", padx=20, pady=20)
 
         card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=25, pady=(20, 15))
+        card_header.pack(fill="x", padx=25, pady=(20, 10))
 
         tk.Label(
             card_header,
@@ -1328,28 +1408,417 @@ class VirtualMemoryApp:
             fg=self.text_primary
         ).pack(side="left")
 
-        tk.Label(
-            card_header,
-            text="Coming Soon",
-            font=("Inter", 10, "bold"),
-            bg="#8b5cf6",
-            fg="white",
-            padx=12,
-            pady=4
-        ).pack(side="right")
+        input_container = tk.Frame(card, bg="#1e293b")
+        input_container.pack(fill="x", padx=25, pady=(10, 5))
 
-        placeholder = tk.Label(
+        input_row1 = tk.Frame(input_container, bg="#1e293b")
+        input_row1.pack(fill="x", pady=(0, 10))
+
+        left_col = tk.Frame(input_row1, bg="#1e293b")
+        left_col.pack(side="left", fill="x", expand=True, padx=(0, 15))
+
+        tk.Label(
+            left_col,
+            text="Page Reference String",
+            font=("Inter", 10, "bold"),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).pack(anchor="w", pady=(0, 5))
+
+        self.comp_page_ref_entry = ModernEntry(left_col, placeholder="e.g. 7 0 1 2 0 3 0 4 2 3 0 3", width=50)
+        self.comp_page_ref_entry.pack(fill="x")
+
+        right_col = tk.Frame(input_row1, bg="#1e293b")
+        right_col.pack(side="left", fill="x", expand=True, padx=(0, 15))
+
+        tk.Label(
+            right_col,
+            text="Number of Frames",
+            font=("Inter", 10, "bold"),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).pack(anchor="w", pady=(0, 5))
+
+        self.comp_frames_entry = ModernEntry(right_col, placeholder="e.g. 3", width=25)
+        self.comp_frames_entry.pack(fill="x")
+
+        btn_col = tk.Frame(input_row1, bg="#1e293b")
+        btn_col.pack(side="left", fill="both", padx=(15, 0))
+
+        tk.Label(
+            btn_col,
+            text="",
+            font=("Inter", 10),
+            bg="#1e293b",
+            fg=self.text_secondary
+        ).pack(anchor="w", pady=(0, 5))
+
+        self.compare_btn = AnimatedButton(
+            btn_col,
+            text="Compare Algorithms",
+            command=self._on_compare_clicked,
+            width=180,
+            height=44
+        )
+        self.compare_btn.pack()
+
+        self.reset_comp_btn = AnimatedButton(
+            btn_col,
+            text="Reset",
+            command=self._on_reset_comparison,
+            width=180,
+            height=36
+        )
+        self.reset_comp_btn.pack(pady=(8, 0))
+
+        self.comp_card = card
+        self.summary_table_frame = tk.Frame(card, bg="#1e293b")
+        self.summary_table_frame.pack(fill="x", padx=25, pady=(10, 10))
+
+        self._init_summary_table()
+
+        self.chart_frame = tk.Frame(card, bg="#1e293b")
+        self.chart_frame.pack(fill="x", padx=25, pady=(10, 10))
+
+        self._create_comparison_chart()
+
+        self.analysis_label = tk.Label(
             card,
-            text="⚡  This module is under development.\n\nFeatures planned:\n• Side-by-side LRU vs Optimal comparison\n• Performance metrics visualization\n• Hit/Miss ratio charts\n• Comparative analysis",
+            text="Run a comparison to see analysis",
             font=("Inter", 12),
             bg="#1e293b",
             fg=self.text_secondary,
-            justify="left",
-            anchor="nw",
-            padx=25,
-            pady=20
+            padx=15,
+            pady=12
         )
-        placeholder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.analysis_label.pack(fill="x", padx=25, pady=(10, 10))
+
+        self.step_table_frame = tk.Frame(card, bg="#1e293b")
+        self.step_table_frame.pack(fill="both", expand=True, padx=25, pady=(10, 20))
+
+        self._create_step_comparison_table()
+
+    def _init_summary_table(self):
+        """Create the side-by-side summary comparison table."""
+        self.summary_table_frame = tk.Frame(self.comp_card, bg="#1e293b")
+
+        card_header = tk.Frame(self.summary_table_frame, bg="#1f2937")
+        card_header.pack(fill="x", padx=0, pady=(0, 5))
+
+        tk.Label(
+            card_header,
+            text="Performance Summary",
+            font=("Inter", 12, "bold"),
+            bg="#1f2937",
+            fg=self.text_primary
+        ).pack(side="left", padx=10, pady=8)
+
+        table_outer = tk.Frame(self.summary_table_frame, bg="#1f2937")
+        table_outer.pack(fill="x", padx=10, pady=(0, 10))
+
+        columns = ["Algorithm", "Total Faults", "Hit Ratio", "Efficiency"]
+        headers = ["Algorithm", "Total Faults", "Hit Ratio", "Efficiency"]
+
+        header_frame = tk.Frame(table_outer, bg="#374151")
+        header_frame.pack(fill="x")
+
+        col_widths = [140, 120, 100, 120]
+        for i, (col, width) in enumerate(zip(columns, col_widths)):
+            tk.Label(
+                header_frame,
+                text=headers[i],
+                font=("Inter", 10, "bold"),
+                bg="#374151",
+                fg=self.text_primary,
+                width=width // 8,
+                anchor="center",
+                pady=8
+            ).pack(side="left")
+
+        self.summary_rows_frame = tk.Frame(table_outer, bg="#1f2937")
+        self.summary_rows_frame.pack(fill="x")
+
+        self.lru_summary_labels = []
+        self.optimal_summary_labels = []
+
+        for row_data, row_labels in [("LRU", self.lru_summary_labels), ("Optimal", self.optimal_summary_labels)]:
+            row_frame = tk.Frame(self.summary_rows_frame, bg="#1f2937")
+            row_frame.pack(fill="x")
+
+            values = [row_data, "--", "--%", "--"]
+            for val, width in zip(values, col_widths):
+                lbl = tk.Label(
+                    row_frame,
+                    text=val,
+                    font=("Inter", 10),
+                    bg="#1f2937",
+                    fg=self.text_primary,
+                    width=width // 8,
+                    anchor="center",
+                    pady=6
+                )
+                lbl.pack(side="left")
+                row_labels.append(lbl)
+
+        self.summary_table_frame.pack(fill="x", padx=25, pady=(10, 10))
+
+    def _create_comparison_chart(self):
+        """Create the Matplotlib bar chart for comparison."""
+        chart_header = tk.Frame(self.chart_frame, bg="#1f2937")
+        chart_header.pack(fill="x", pady=(0, 5))
+
+        tk.Label(
+            chart_header,
+            text="Page Fault Comparison",
+            font=("Inter", 12, "bold"),
+            bg="#1f2937",
+            fg=self.text_primary
+        ).pack(side="left", padx=10, pady=8)
+
+        self.comp_fig = Figure(figsize=(8, 4), dpi=100, facecolor='#161b22')
+        self.comp_ax = self.comp_fig.add_subplot(111)
+        self.comp_ax.set_facecolor('#161b22')
+
+        self.comp_ax.set_xlabel('Algorithm', color='#9ca3af', fontsize=10)
+        self.comp_ax.set_ylabel('Number of Page Faults', color='#9ca3af', fontsize=10)
+        self.comp_ax.tick_params(colors='#9ca3af', labelsize=10)
+
+        self.comp_ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
+        self.comp_ax.spines['bottom'].set_color('#4b5563')
+        self.comp_ax.spines['left'].set_color('#4b5563')
+        self.comp_ax.spines['top'].set_visible(False)
+        self.comp_ax.spines['right'].set_visible(False)
+
+        self.comp_fig.tight_layout(pad=2.0)
+
+        chart_inner = tk.Frame(self.chart_frame, bg='#161b22')
+        chart_inner.pack(fill="x", padx=0, pady=(0, 5))
+
+        self.comp_canvas = FigureCanvasTkAgg(self.comp_fig, master=chart_inner)
+        self.comp_canvas.get_tk_widget().configure(bg='#161b22')
+        self.comp_canvas.get_tk_widget().pack(fill="x")
+
+        self._update_comparison_chart(0, 0)
+
+    def _update_comparison_chart(self, lru_faults, optimal_faults):
+        """Update the comparison bar chart."""
+        self.comp_ax.clear()
+        self.comp_ax.set_facecolor('#161b22')
+
+        self.comp_ax.set_xlabel('Algorithm', color='#9ca3af', fontsize=10)
+        self.comp_ax.set_ylabel('Number of Page Faults', color='#9ca3af', fontsize=10)
+        self.comp_ax.tick_params(colors='#9ca3af', labelsize=10)
+
+        self.comp_ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
+        self.comp_ax.spines['bottom'].set_color('#4b5563')
+        self.comp_ax.spines['left'].set_color('#4b5563')
+        self.comp_ax.spines['top'].set_visible(False)
+        self.comp_ax.spines['right'].set_visible(False)
+
+        if lru_faults == 0 and optimal_faults == 0:
+            self.comp_ax.text(0.5, 0.5, 'Run comparison to see chart',
+                             ha='center', va='center', transform=self.comp_ax.transAxes,
+                             color='#64748b', fontsize=12, style='italic')
+            self.comp_ax.set_xlim(0, 1)
+            self.comp_ax.set_ylim(0, 1)
+            self.comp_ax.axis('off')
+        else:
+            algorithms = ['LRU', 'Optimal']
+            faults = [lru_faults, optimal_faults]
+            colors = ['#f97316', '#3b82f6']
+
+            bars = self.comp_ax.bar(algorithms, faults, color=colors, width=0.5, edgecolor='white', linewidth=1)
+
+            for bar, fault_count in zip(bars, faults):
+                height = bar.get_height()
+                self.comp_ax.text(bar.get_x() + bar.get_width()/2., height,
+                                 f'{fault_count}',
+                                 ha='center', va='bottom', fontsize=12, fontweight='bold', color='white')
+
+            self.comp_ax.set_ylim(0, max(faults) * 1.2)
+            self.comp_ax.set_xticks(range(len(algorithms)))
+            self.comp_ax.set_xticklabels(algorithms)
+
+            for i, (alg, color) in enumerate(zip(algorithms, colors)):
+                rect = plt.Rectangle((0, 0), 0, 0, facecolor=color, label=alg)
+                self.comp_ax.legend(handles=[plt.Rectangle((0,0),1,1, facecolor=colors[0]),
+                                            plt.Rectangle((0,0),1,1, facecolor=colors[1])],
+                                   labels=algorithms, loc='upper right',
+                                   facecolor='#1e293b', edgecolor='#4b5563', labelcolor='#e5e7eb')
+
+        self.comp_fig.tight_layout(pad=2.0)
+        self.comp_canvas.draw()
+
+    def _create_step_comparison_table(self):
+        """Create the step-by-step comparison table."""
+        step_header = tk.Frame(self.step_table_frame, bg="#1f2937")
+        step_header.pack(fill="x", pady=(0, 5))
+
+        tk.Label(
+            step_header,
+            text="Step-by-Step Comparison",
+            font=("Inter", 12, "bold"),
+            bg="#1f2937",
+            fg=self.text_primary
+        ).pack(side="left", padx=10, pady=8)
+
+        self.step_table_container = tk.Frame(self.step_table_frame, bg="#1f2937")
+        self.step_table_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.step_table_placeholder = tk.Label(
+            self.step_table_container,
+            text="Run a comparison to see step-by-step execution",
+            font=("Inter", 12),
+            bg="#1f2937",
+            fg="#64748b",
+            pady=40
+        )
+        self.step_table_placeholder.pack(fill="both", expand=True)
+
+        self.step_table_inner = tk.Frame(self.step_table_container, bg="#1f2937")
+        self.step_table_inner.pack_forget()
+
+    def _on_compare_clicked(self):
+        """Handle Compare Algorithms button click."""
+        page_ref_str = self.comp_page_ref_entry.get()
+        frames_str = self.comp_frames_entry.get()
+
+        if not page_ref_str:
+            messagebox.showerror("Input Error", "Please enter a page reference string.")
+            return
+
+        if not frames_str:
+            messagebox.showerror("Input Error", "Please enter the number of frames.")
+            return
+
+        pages = parse_page_reference(page_ref_str)
+        if pages is None or len(pages) == 0:
+            messagebox.showerror("Input Error", "Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).")
+            return
+
+        try:
+            num_frames = int(frames_str)
+            if num_frames <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Input Error", "Number of frames must be a positive integer (at least 1).")
+            return
+
+        self.compare_btn.configure(state="disabled")
+        self._update_status_bar("Running comparison...")
+        
+        try:
+            lru_snapshots, lru_faults_list, lru_total = simulate_lru(pages, num_frames)
+            opt_snapshots, opt_faults_list, opt_total = simulate_optimal(pages, num_frames)
+
+            self._update_comparison_results(pages, lru_snapshots, lru_faults_list, lru_total,
+                                            opt_snapshots, opt_faults_list, opt_total, num_frames)
+            self._update_status_bar(f"Comparison complete: LRU={lru_total} faults, Optimal={opt_total} faults")
+        except Exception as e:
+            messagebox.showerror("Error", f"Comparison failed: {str(e)}")
+            self._update_status_bar("Comparison failed")
+        finally:
+            self.compare_btn.configure(state="normal")
+
+    def _update_comparison_results(self, pages, lru_snapshots, lru_faults, lru_total,
+                                   opt_snapshots, opt_faults, opt_total, num_frames):
+        """Update all comparison results: summary, chart, analysis, and step table."""
+        total_refs = len(pages)
+        lru_hits = total_refs - lru_total
+        opt_hits = total_refs - opt_total
+        lru_hit_ratio = (lru_hits / total_refs * 100) if total_refs > 0 else 0
+        opt_hit_ratio = (opt_hits / total_refs * 100) if total_refs > 0 else 0
+        lru_eff = f"{(lru_hits / lru_total * 100):.1f}%" if lru_total > 0 else "N/A"
+        opt_eff = f"{(opt_hits / opt_total * 100):.1f}%" if opt_total > 0 else "N/A"
+
+        for lbl in self.lru_summary_labels:
+            lbl.configure(fg=self.text_primary)
+        for lbl in self.optimal_summary_labels:
+            lbl.configure(fg=self.text_primary)
+
+        self.lru_summary_labels[0].configure(text="LRU", fg="#f97316")
+        self.lru_summary_labels[1].configure(text=str(lru_total))
+        self.lru_summary_labels[2].configure(text=f"{lru_hit_ratio:.1f}%")
+        self.lru_summary_labels[3].configure(text=lru_eff)
+
+        self.optimal_summary_labels[0].configure(text="Optimal", fg="#3b82f6")
+        self.optimal_summary_labels[1].configure(text=str(opt_total))
+        self.optimal_summary_labels[2].configure(text=f"{opt_hit_ratio:.1f}%")
+        self.optimal_summary_labels[3].configure(text=opt_eff)
+
+        self._update_comparison_chart(lru_total, opt_total)
+
+        if lru_total > opt_total:
+            diff = lru_total - opt_total
+            pct = (diff / lru_total * 100) if lru_total > 0 else 0
+            analysis_text = f"Optimal algorithm produced {diff} fewer page faults than LRU ({pct:.1f}% improvement)"
+        elif opt_total > lru_total:
+            diff = opt_total - lru_total
+            pct = (diff / opt_total * 100) if opt_total > 0 else 0
+            analysis_text = f"LRU algorithm produced {diff} fewer page faults than Optimal ({pct:.1f}% improvement)"
+        else:
+            analysis_text = "Both algorithms produced the same number of page faults"
+
+        self.analysis_label.configure(text=analysis_text, fg=self.text_primary, bg="#1e293b")
+
+        self._display_step_comparison(pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults, num_frames)
+
+    def _display_step_comparison(self, pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults, num_frames):
+        """Display the step-by-step comparison table."""
+        self.step_table_placeholder.pack_forget()
+        self.step_table_inner.pack_forget()
+
+        self.step_table_inner = tk.Frame(self.step_table_container, bg="#1f2937")
+        self.step_table_inner.pack(fill="both", expand=True)
+
+        scrollbar_y = ttk.Scrollbar(self.step_table_inner, orient="vertical")
+        scrollbar_y.pack(side="right", fill="y")
+
+        scrollbar_x = ttk.Scrollbar(self.step_table_inner, orient="horizontal")
+        scrollbar_x.pack(side="bottom", fill="x")
+
+        self.step_tree = ttk.Treeview(self.step_table_inner, show="headings", style="Modern.Treeview",
+                                      yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set,
+                                      height=10)
+        scrollbar_y.configure(command=self.step_tree.yview)
+        scrollbar_x.configure(command=self.step_tree.xview)
+
+        self.step_tree.pack(side="left", fill="both", expand=True)
+
+        columns = ["Step", "Page", "LRU Frames", "LRU Fault", "Optimal Frames", "Optimal Fault"]
+        self.step_tree["columns"] = columns
+        self.step_tree["show"] = "headings"
+
+        col_widths = [50, 50, 150, 80, 150, 90]
+        for col, width in zip(columns, col_widths):
+            self.step_tree.heading(col, text=col)
+            self.step_tree.column(col, width=width, anchor="center")
+
+        for i, (page, lru_frames, lru_fault, opt_frames, opt_fault) in enumerate(
+                zip(pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults)):
+
+            lru_frames_str = str(lru_frames) if lru_frames else "[]"
+            opt_frames_str = str(opt_frames) if opt_frames else "[]"
+            lru_fault_str = "FAULT" if lru_fault else "HIT"
+            opt_fault_str = "FAULT" if opt_fault else "HIT"
+
+            row_values = [i + 1, page, lru_frames_str, lru_fault_str, opt_frames_str, opt_fault_str]
+
+            if lru_fault and opt_fault:
+                tag = "both_fault"
+            elif lru_fault:
+                tag = "lru_fault"
+            elif opt_fault:
+                tag = "opt_fault"
+            else:
+                tag = "both_hit"
+
+            self.step_tree.insert("", "end", values=row_values, tags=(tag,))
+
+        self.step_tree.tag_configure("both_fault", background="#7f1d1d", foreground="white")
+        self.step_tree.tag_configure("lru_fault", background="#78350f", foreground="white")
+        self.step_tree.tag_configure("opt_fault", background="#1e3a5f", foreground="white")
+        self.step_tree.tag_configure("both_hit", background="#14532d", foreground="white")
 
     def _on_run_clicked(self):
         """Handle Run Simulation button click."""
@@ -1366,7 +1835,7 @@ class VirtualMemoryApp:
 
         pages = parse_page_reference(page_ref_str)
         if pages is None or len(pages) == 0:
-            messagebox.showerror("Input Error", "Invalid page reference string. Please enter space or comma-separated integers.")
+            messagebox.showerror("Input Error", "Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).")
             return
 
         try:
@@ -1374,16 +1843,26 @@ class VirtualMemoryApp:
             if num_frames <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Input Error", "Number of frames must be a positive integer.")
+            messagebox.showerror("Input Error", "Number of frames must be a positive integer (at least 1).")
             return
 
         if num_frames > 10:
             messagebox.showwarning("Warning", "Large number of frames may affect visualization.")
         
-        algorithm_name = self.algorithm_dropdown.get()
-        algorithm_func = ALGORITHMS.get(algorithm_name, simulate_lru)
-        frames_snapshots, fault_flags, total_faults = algorithm_func(pages, num_frames)
-        self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
+        self.run_button.configure(state="disabled")
+        self._update_status_bar("Running simulation...")
+        
+        try:
+            algorithm_name = self.algorithm_dropdown.get()
+            algorithm_func = ALGORITHMS.get(algorithm_name, simulate_lru)
+            frames_snapshots, fault_flags, total_faults = algorithm_func(pages, num_frames)
+            self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
+            self._update_status_bar(f"Simulation complete: {algorithm_name} algorithm with {total_faults} page faults")
+        except Exception as e:
+            messagebox.showerror("Error", f"Simulation failed: {str(e)}")
+            self._update_status_bar("Simulation failed")
+        finally:
+            self.run_button.configure(state="normal")
 
     def _display_results(self, pages, frame_snapshots, fault_flags, total_faults, num_frames):
         """Display simulation results in the Treeview table and update graph."""
@@ -1431,6 +1910,61 @@ class VirtualMemoryApp:
         self.root.update_idletasks()
         if hasattr(self, 'scroll_canvas'):
             self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def _on_reset_paging(self):
+        """Reset the paging tab to initial state."""
+        self.page_ref_entry.entry.delete(0, tk.END)
+        self.page_ref_entry.entry.insert(0, self.page_ref_entry.placeholder)
+        self.page_ref_entry.entry.configure(fg=self.page_ref_entry.placeholder_color)
+        self.page_ref_entry._has_value = False
+        
+        self.frames_entry.entry.delete(0, tk.END)
+        self.frames_entry.entry.insert(0, self.frames_entry.placeholder)
+        self.frames_entry.entry.configure(fg=self.frames_entry.placeholder_color)
+        self.frames_entry._has_value = False
+        
+        self.algorithm_dropdown.dropdown.current(0)
+        
+        self.page_faults_label.configure(text="Faults: --")
+        self.hit_ratio_label.configure(text="Hit: --")
+        self.summary_label.configure(text="Total References: --  |  Total Faults: --  |  Hit Ratio: --")
+        
+        self.table_placeholder.pack(fill="both", expand=True)
+        self.table_inner.pack_forget()
+        
+        for item in self.result_tree.get_children():
+            self.result_tree.delete(item)
+        
+        self._update_graph([], [], [])
+        self._update_status_bar("Paging tab reset")
+
+    def _on_reset_comparison(self):
+        """Reset the comparison tab to initial state."""
+        self.comp_page_ref_entry.entry.delete(0, tk.END)
+        self.comp_page_ref_entry.entry.insert(0, self.comp_page_ref_entry.placeholder)
+        self.comp_page_ref_entry.entry.configure(fg=self.comp_page_ref_entry.placeholder_color)
+        self.comp_page_ref_entry._has_value = False
+        
+        self.comp_frames_entry.entry.delete(0, tk.END)
+        self.comp_frames_entry.entry.insert(0, self.comp_frames_entry.placeholder)
+        self.comp_frames_entry.entry.configure(fg=self.comp_frames_entry.placeholder_color)
+        self.comp_frames_entry._has_value = False
+        
+        for lbl in self.lru_summary_labels:
+            lbl.configure(text="--", fg=self.text_primary)
+        self.lru_summary_labels[0].configure(text="LRU", fg="#f97316")
+        
+        for lbl in self.optimal_summary_labels:
+            lbl.configure(text="--", fg=self.text_primary)
+        self.optimal_summary_labels[0].configure(text="Optimal", fg="#3b82f6")
+        
+        self._update_comparison_chart(0, 0)
+        self.analysis_label.configure(text="Run a comparison to see analysis", fg=self.text_secondary, bg="#1e293b")
+        
+        self.step_table_placeholder.pack(fill="both", expand=True)
+        self.step_table_inner.pack_forget()
+        
+        self._update_status_bar("Comparison tab reset")
 
     def _create_fault_graph(self, parent):
         """Create the embedded Matplotlib graph for page faults."""
