@@ -1,0 +1,1702 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Memory Management Simulator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #161b22 0%, #0d1117 100%);
+            border-bottom: 1px solid #30363d;
+            padding: 20px 0;
+            margin-bottom: 24px;
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: #58a6ff;
+        }
+
+        .subtitle {
+            color: #8b949e;
+            font-size: 14px;
+        }
+
+        .badge {
+            background: #238636;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 1px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            color: #8b949e;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s ease;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .tab:hover {
+            color: #e6edf3;
+            background: #21262d;
+        }
+
+        .tab.active {
+            color: #58a6ff;
+            border-bottom-color: #58a6ff;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: #21262d;
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #238636;
+        }
+
+        .panel-body {
+            padding: 16px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .input-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input, select {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #e6edf3;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+
+        input::placeholder {
+            color: #484f58;
+        }
+
+        select {
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .btn-primary {
+            background: #238636;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2ea043;
+        }
+
+        .btn-secondary {
+            background: #21262d;
+            color: #e6edf3;
+            border: 1px solid #30363d;
+        }
+
+        .btn-secondary:hover {
+            background: #30363d;
+        }
+
+        .btn-danger {
+            background: #da3633;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #f85149;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .stat-box {
+            background: #0d1117;
+            padding: 12px 16px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-value.fault {
+            color: #f85149;
+        }
+
+        .stat-value.hit {
+            color: #3fb950;
+        }
+
+        .stat-value.warning {
+            color: #d29922;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: center;
+            border-bottom: 1px solid #21262d;
+        }
+
+        th {
+            background: #21262d;
+            font-weight: 600;
+            color: #8b949e;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:nth-child(even) {
+            background: #0d1117;
+        }
+
+        tr:hover {
+            background: #1c2128;
+        }
+
+        .fault-row {
+            background: rgba(248, 81, 73, 0.15) !important;
+        }
+
+        .hit-row {
+            background: rgba(63, 185, 80, 0.15) !important;
+        }
+
+        .allocated-row {
+            background: rgba(63, 185, 80, 0.15) !important;
+        }
+
+        .failed-row {
+            background: rgba(248, 81, 73, 0.15) !important;
+        }
+
+        .both-fault-row {
+            background: rgba(248, 81, 73, 0.2) !important;
+        }
+
+        .lru-fault-row {
+            background: rgba(210, 153, 34, 0.2) !important;
+        }
+
+        .opt-fault-row {
+            background: rgba(88, 166, 255, 0.2) !important;
+        }
+
+        .both-hit-row {
+            background: rgba(63, 185, 80, 0.2) !important;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        .chart-container {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 16px;
+            border: 1px solid #30363d;
+        }
+
+        .chart-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .segment-list {
+            max-height: 150px;
+            overflow-y: auto;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+
+        .segment-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-bottom: 1px solid #21262d;
+            font-size: 13px;
+        }
+
+        .segment-item:last-child {
+            border-bottom: none;
+        }
+
+        .segment-name {
+            font-weight: 500;
+        }
+
+        .segment-size {
+            color: #8b949e;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #8b949e;
+        }
+
+        .memory-diagram {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .memory-bar {
+            display: flex;
+            height: 50px;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid #30363d;
+        }
+
+        .memory-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .memory-free {
+            background: #30363d;
+            color: #8b949e;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+        }
+
+        .summary-table {
+            width: 100%;
+            margin: 16px 0;
+        }
+
+        .summary-table th {
+            background: #21262d;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .summary-table td {
+            padding: 12px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .lru-color {
+            color: #f97316;
+            font-weight: 600;
+        }
+
+        .optimal-color {
+            color: #3b82f6;
+            font-weight: 600;
+        }
+
+        .analysis-box {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+            text-align: center;
+            font-size: 14px;
+            margin: 16px 0;
+        }
+
+        .analysis-box.positive {
+            border-color: #238636;
+            background: rgba(35, 134, 54, 0.1);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 12px;
+            font-size: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        .status-bar {
+            background: #161b22;
+            border-top: 1px solid #30363d;
+            padding: 8px 20px;
+            font-size: 12px;
+            color: #8b949e;
+            display: flex;
+            align-items: center;
+        }
+
+        .status-bar .status-text {
+            flex: 1;
+        }
+
+        @media (max-width: 768px) {
+            .grid-2, .grid-3 {
+                grid-template-columns: 1fr;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .tabs {
+                overflow-x: auto;
+            }
+            
+            .tab {
+                padding: 10px 16px;
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">Virtual Memory Simulator</div>
+            <div class="subtitle">Paging, Segmentation & Algorithm Comparison</div>
+            <div class="badge">v1.0</div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" data-tab="paging">Paging & Demand Paging</button>
+            <button class="tab" data-tab="segmentation">Segmentation & Fragmentation</button>
+            <button class="tab" data-tab="comparison">LRU vs Optimal Comparison</button>
+        </div>
+
+        <!-- Tab 1: Paging -->
+        <div id="paging" class="tab-content active">
+            <div class="grid grid-2">
+                <div>
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <span class="status-dot"></span>
+                                Configuration
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="input-group">
+                                <label>Page Reference String</label>
+                                <input type="text" id="pageRef" placeholder="e.g. 7 0 1 2 0 3 0 4 2 3 0 3">
+                            </div>
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Number of Frames</label>
+                                <input type="number" id="numFrames" placeholder="e.g. 3" min="1" max="10">
+                            </div>
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Algorithm</label>
+                                <select id="algorithm">
+                                    <option value="lru">LRU (Least Recently Used)</option>
+                                    <option value="optimal">Optimal</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" style="margin-top: 16px; width: 100%;" onclick="runSimulation()">
+                                Run Simulation
+                            </button>
+                            <button class="btn btn-secondary" style="margin-top: 8px; width: 100%;" onclick="resetPaging()">
+                                Reset / Clear
+                            </button>
+                            <div style="margin-top: 12px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                                <strong>LRU:</strong> Replaces least recently used page<br>
+                                <strong>Optimal:</strong> Replaces page used farthest in future
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel" id="pagingStats" style="display: none;">
+                        <div class="panel-header">
+                            <div class="panel-title">Statistics</div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stats-row">
+                                <div class="stat-box">
+                                    <div class="stat-label">Page Faults</div>
+                                    <div class="stat-value fault" id="faultCount">0</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Hit Ratio</div>
+                                    <div class="stat-value hit" id="hitRatio">0%</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Total References</div>
+                                    <div class="stat-value" id="totalRefs">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">Results Table</div>
+                        </div>
+                        <div class="panel-body" style="padding: 0;">
+                            <div class="table-container" id="resultsTable">
+                                <div class="empty-state">Run a simulation to see results</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Page Fault Graph</div>
+                </div>
+                <div class="panel-body">
+                    <div class="chart-container">
+                        <canvas id="faultChart" width="800" height="250"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Segmentation -->
+        <div id="segmentation" class="tab-content">
+            <div class="grid grid-2">
+                <div>
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <span class="status-dot"></span>
+                                Add Segment
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="input-group">
+                                <label>Segment Name</label>
+                                <input type="text" id="segName" placeholder="e.g. Code, Data, Stack">
+                            </div>
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Segment Size (KB)</label>
+                                <input type="number" id="segSize" placeholder="e.g. 100" min="1">
+                            </div>
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Total Memory (KB)</label>
+                                <input type="number" id="totalMem" placeholder="512" value="512" min="1">
+                            </div>
+                            <div class="btn-group" style="margin-top: 16px;">
+                                <button class="btn btn-primary" onclick="addSegment()">Add Segment</button>
+                                <button class="btn btn-secondary" onclick="runSegmentation()">Run</button>
+                                <button class="btn btn-danger" onclick="clearSegments()">Clear</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">Segments List</div>
+                            <span id="segCount" style="color: #8b949e; font-size: 12px;">0 segments</span>
+                        </div>
+                        <div class="panel-body" style="padding: 0;">
+                            <div class="segment-list" id="segList">
+                                <div class="empty-state" style="padding: 20px;">No segments added</div>
+                            </div>
+                        </div>
+                        <div style="padding: 8px 12px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                            <strong>External fragmentation:</strong> Free memory that cannot be used to satisfy a request due to being split into small non-contiguous blocks.
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">Allocation Results</div>
+                            <span id="segStatus" style="color: #8b949e; font-size: 12px;">Add segments and run</span>
+                        </div>
+                        <div class="panel-body" style="padding: 0;">
+                            <div class="table-container" id="segResultsTable">
+                                <div class="empty-state">Run segmentation to see results</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">Statistics</div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stats-row">
+                                <div class="stat-box">
+                                    <div class="stat-label">Used</div>
+                                    <div class="stat-value hit" id="segUsed">-- KB</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Free</div>
+                                    <div class="stat-value warning" id="segFree">-- KB</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Fragmentation</div>
+                                    <div class="stat-value fault" id="segFrag">-- KB</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Memory Visualization</div>
+                </div>
+                <div class="panel-body">
+                    <div class="memory-diagram">
+                        <canvas id="memoryCanvas" width="800" height="100"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Comparison -->
+        <div id="comparison" class="tab-content">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Algorithm Comparison</div>
+                </div>
+                <div class="panel-body">
+                    <div class="grid grid-2">
+                        <div class="input-group">
+                            <label>Page Reference String</label>
+                            <input type="text" id="compPageRef" placeholder="e.g. 7 0 1 2 0 3 0 4 2 3 0 3">
+                        </div>
+                        <div class="input-group">
+                            <label>Number of Frames</label>
+                            <input type="number" id="compFrames" placeholder="e.g. 3" min="1" max="10">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" style="margin-top: 16px;" onclick="runComparison()">
+                        Compare Algorithms
+                    </button>
+                    <button class="btn btn-secondary" style="margin-top: 16px; margin-left: 8px;" onclick="resetComparison()">
+                        Reset
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Performance Summary</div>
+                </div>
+                <div class="panel-body">
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th>Algorithm</th>
+                                <th>Total Faults</th>
+                                <th>Hit Ratio</th>
+                                <th>Efficiency</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="lru-color">LRU</td>
+                                <td id="compLruFaults">--</td>
+                                <td id="compLruHit">--</td>
+                                <td id="compLruEff">--</td>
+                            </tr>
+                            <tr>
+                                <td class="optimal-color">Optimal</td>
+                                <td id="compOptFaults">--</td>
+                                <td id="compOptHit">--</td>
+                                <td id="compOptEff">--</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Page Fault Comparison</div>
+                </div>
+                <div class="panel-body">
+                    <div class="chart-container">
+                        <canvas id="compChart" width="600" height="320"></canvas>
+                        <div class="legend">
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #f97316;"></div>
+                                <span>LRU</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #3b82f6;"></div>
+                                <span>Optimal</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="analysis-box" id="analysisBox">
+                Run a comparison to see analysis
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Step-by-Step Comparison</div>
+                </div>
+                <div class="panel-body" style="padding: 0;">
+                    <div class="table-container" id="compTable">
+                        <div class="empty-state">Run a comparison to see step-by-step execution</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span class="status-text" id="statusText">Ready</span>
+    </div>
+
+    <script>
+        // Global state
+        let segments = [];
+        let simulationRunning = false;
+
+        // Status bar update
+        function updateStatus(message) {
+            document.getElementById('statusText').textContent = message;
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Parse page reference string
+        function parsePageRef(str) {
+            const nums = str.trim().split(/[\s,]+/).map(s => parseInt(s)).filter(n => !isNaN(n));
+            return nums.length > 0 ? nums : null;
+        }
+
+        // LRU Algorithm
+        function simulateLRU(pages, numFrames) {
+            const frames = [];
+            const frameSnapshots = [];
+            const faultFlags = [];
+            let totalFaults = 0;
+            // recentUse stores pages in order of least recently used (index 0) to most recently used (last)
+            const recentUse = [];
+
+            for (const page of pages) {
+                const idx = frames.indexOf(page);
+                
+                if (idx !== -1) {
+                    // PAGE HIT: page is already in frames
+                    faultFlags.push(false);
+                    // Remove page from its current position in recentUse
+                    const useIdx = recentUse.indexOf(page);
+                    if (useIdx !== -1) {
+                        recentUse.splice(useIdx, 1);
+                    }
+                    // Add to end (most recently used)
+                    recentUse.push(page);
+                } else {
+                    // PAGE FAULT: page not in frames
+                    totalFaults++;
+                    faultFlags.push(true);
+                    
+                    if (frames.length < numFrames) {
+                        // Frames not full - just add the page
+                        frames.push(page);
+                        recentUse.push(page);
+                    } else {
+                        // Frames full - evict LRU page (first in recentUse)
+                        const lruPage = recentUse.shift();
+                        const replaceIdx = frames.indexOf(lruPage);
+                        if (replaceIdx !== -1) {
+                            frames[replaceIdx] = page;
+                        }
+                        recentUse.push(page);
+                    }
+                }
+                frameSnapshots.push([...frames]);
+            }
+
+            return { frameSnapshots, faultFlags, totalFaults };
+        }
+        
+        // Test LRU to verify correctness with user's example
+        function testLRU() {
+            const pages = [7, 0, 1, 2, 3, 1, 2, 3, 2, 1];
+            const numFrames = 3;
+            const result = simulateLRU(pages, numFrames);
+            
+            const expectedSnapshots = [[7], [7,0], [7,0,1], [2,0,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1]];
+            const expectedFaults = [true, true, true, true, true, false, false, false, false, false];
+            
+            let allMatch = true;
+            let output = "LRU Test: pages=[7,0,1,2,3,1,2,3,2,1], frames=3\n\n";
+            
+            for (let i = 0; i < pages.length; i++) {
+                const snapMatch = JSON.stringify(result.frameSnapshots[i]) === JSON.stringify(expectedSnapshots[i]);
+                const faultMatch = result.faultFlags[i] === expectedFaults[i];
+                
+                output += `Step ${i+1}: Page=${pages[i]}, `;
+                output += `Frames=[${result.frameSnapshots[i].join(',')}], `;
+                output += `Fault=${result.faultFlags[i] ? 'FAULT' : 'HIT'}`;
+                if (snapMatch && faultMatch) {
+                    output += " Γ£ô\n";
+                } else {
+                    output += ` Γ£ù (expected [${expectedSnapshots[i].join(',')}])\n`;
+                    allMatch = false;
+                }
+            }
+            
+            output += `\nTotal Faults: ${result.totalFaults} (expected: 5)\n`;
+            
+            if (allMatch && result.totalFaults === 5) {
+                output += "\nΓ£ô LRU algorithm is CORRECT!";
+                alert("LRU Test PASSED!\n\n" + output);
+            } else {
+                output += "\nΓ£ù LRU algorithm has issues";
+                alert("LRU Test FAILED!\n\n" + output);
+            }
+            
+            console.log(output);
+            return allMatch;
+        }
+        
+        // Run test automatically on load
+        // testLRU();
+
+        // Optimal Algorithm
+        function simulateOptimal(pages, numFrames) {
+            const frames = [];
+            const frameSnapshots = [];
+            const faultFlags = [];
+            let totalFaults = 0;
+
+            for (let i = 0; i < pages.length; i++) {
+                const page = pages[i];
+                const idx = frames.indexOf(page);
+                if (idx !== -1) {
+                    faultFlags.push(false);
+                } else {
+                    totalFaults++;
+                    faultFlags.push(true);
+                    if (frames.length < numFrames) {
+                        frames.push(page);
+                    } else {
+                        let replaceIdx = 0;
+                        let maxDist = -1;
+                        for (let j = 0; j < frames.length; j++) {
+                            const futureUse = pages.slice(i + 1).indexOf(frames[j]);
+                            const dist = futureUse === -1 ? Infinity : futureUse;
+                            if (dist > maxDist) {
+                                maxDist = dist;
+                                replaceIdx = j;
+                            }
+                        }
+                        frames[replaceIdx] = page;
+                    }
+                }
+                frameSnapshots.push([...frames]);
+            }
+
+            return { frameSnapshots, faultFlags, totalFaults };
+        }
+
+        // Run paging simulation
+        function runSimulation() {
+            const pageRef = document.getElementById('pageRef').value.trim();
+            const numFrames = parseInt(document.getElementById('numFrames').value);
+            const algorithm = document.getElementById('algorithm').value;
+
+            if (!pageRef) {
+                alert('Input Error: Please enter a page reference string.');
+                return;
+            }
+
+            const pages = parsePageRef(pageRef);
+            if (!pages || pages.length === 0) {
+                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
+                return;
+            }
+
+            if (!numFrames || numFrames < 1) {
+                alert('Input Error: Number of frames must be a positive integer (at least 1).');
+                return;
+            }
+
+            const runBtn = document.querySelector('#paging .btn-primary');
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            updateStatus('Running simulation...');
+
+            setTimeout(() => {
+                try {
+                    const result = algorithm === 'lru' ? simulateLRU(pages, numFrames) : simulateOptimal(pages, numFrames);
+                    displayResults(pages, result, numFrames);
+                    updateStatus(`Simulation complete: ${algorithm.toUpperCase()} algorithm with ${result.totalFaults} page faults`);
+                } catch (e) {
+                    alert('Error: Simulation failed - ' + e.message);
+                    updateStatus('Simulation failed');
+                } finally {
+                    runBtn.disabled = false;
+                    runBtn.textContent = 'Run Simulation';
+                }
+            }, 50);
+        }
+
+        // Reset paging tab
+        function resetPaging() {
+            document.getElementById('pageRef').value = '';
+            document.getElementById('numFrames').value = '';
+            document.getElementById('algorithm').selectedIndex = 0;
+            document.getElementById('pagingStats').style.display = 'none';
+            document.getElementById('resultsTable').innerHTML = '<div class="empty-state">Run a simulation to see results</div>';
+            drawFaultChart([], []);
+            updateStatus('Paging tab reset');
+        }
+
+        // Display paging results
+        function displayResults(pages, result, numFrames) {
+            const { frameSnapshots, faultFlags, totalFaults } = result;
+            
+            document.getElementById('pagingStats').style.display = 'block';
+            document.getElementById('faultCount').textContent = totalFaults;
+            
+            const hits = pages.length - totalFaults;
+            const hitRatio = ((hits / pages.length) * 100).toFixed(1);
+            document.getElementById('hitRatio').textContent = hitRatio + '%';
+            document.getElementById('totalRefs').textContent = pages.length;
+
+            let tableHTML = `<table>
+                <thead><tr><th>Step</th><th>Page</th>`;
+            for (let i = 1; i <= numFrames; i++) {
+                tableHTML += `<th>Frame ${i}</th>`;
+            }
+            tableHTML += `<th>Fault?</th></tr></thead><tbody>`;
+
+            for (let i = 0; i < pages.length; i++) {
+                const rowClass = faultFlags[i] ? 'fault-row' : 'hit-row';
+                const faultText = faultFlags[i] ? 'FAULT' : 'HIT';
+                tableHTML += `<tr class="${rowClass}">
+                    <td>${i + 1}</td>
+                    <td>${pages[i]}</td>`;
+                for (let j = 0; j < numFrames; j++) {
+                    tableHTML += `<td>${frameSnapshots[i][j] !== undefined ? frameSnapshots[i][j] : '-'}</td>`;
+                }
+                tableHTML += `<td><strong>${faultText}</strong></td></tr>`;
+            }
+            tableHTML += '</tbody></table>';
+            document.getElementById('resultsTable').innerHTML = tableHTML;
+
+            drawFaultChart(pages, faultFlags);
+        }
+
+        // Draw fault graph
+        function drawFaultChart(pages, faultFlags) {
+            const canvas = document.getElementById('faultChart');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = { top: 30, right: 40, bottom: 50, left: 60 };
+
+            ctx.clearRect(0, 0, width, height);
+
+            const cumulative = [];
+            let count = 0;
+            for (const f of faultFlags) {
+                if (f) count++;
+                cumulative.push(count);
+            }
+
+            const maxY = Math.max(...cumulative, 1) + 1;
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            const xStep = chartWidth / (pages.length - 1 || 1);
+            const yScale = chartHeight / maxY;
+
+            // Draw subtle background grid
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= maxY; i++) {
+                const y = padding.top + chartHeight - i * yScale;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+            }
+            for (let i = 0; i < pages.length; i++) {
+                const x = padding.left + i * xStep;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartHeight);
+                ctx.stroke();
+            }
+
+            // Y-axis labels
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '11px Inter';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= maxY; i++) {
+                const y = padding.top + chartHeight - i * yScale;
+                ctx.fillText(i, padding.left - 10, y + 4);
+            }
+
+            // X-axis labels
+            ctx.textAlign = 'center';
+            const labelInterval = pages.length > 20 ? 5 : (pages.length > 10 ? 2 : 1);
+            for (let i = 0; i < pages.length; i += labelInterval) {
+                const x = padding.left + i * xStep;
+                ctx.fillText(i + 1, x, height - padding.bottom + 20);
+            }
+            ctx.fillStyle = '#6e7681';
+            ctx.font = '10px Inter';
+            ctx.fillText('1', padding.left, height - padding.bottom + 20);
+            if (pages.length > 1) {
+                ctx.fillText(pages.length, width - padding.right, height - padding.bottom + 20);
+            }
+
+            // Calculate points
+            const points = [];
+            for (let i = 0; i < cumulative.length; i++) {
+                const x = padding.left + i * xStep;
+                const y = padding.top + chartHeight - cumulative[i] * yScale;
+                points.push({ x, y });
+            }
+
+            // Draw filled area with gradient
+            const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
+            gradient.addColorStop(0, 'rgba(88, 166, 255, 0.4)');
+            gradient.addColorStop(1, 'rgba(88, 166, 255, 0.02)');
+
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, height - padding.bottom);
+            ctx.lineTo(points[0].x, points[0].y);
+            
+            // Smooth curve through points using bezier curves
+            for (let i = 0; i < points.length - 1; i++) {
+                const xc = (points[i].x + points[i + 1].x) / 2;
+                const yc = (points[i].y + points[i + 1].y) / 2;
+                ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+            }
+            ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+            
+            ctx.lineTo(points[points.length - 1].x, height - padding.bottom);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            // Draw smooth line
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 0; i < points.length - 1; i++) {
+                const xc = (points[i].x + points[i + 1].x) / 2;
+                const yc = (points[i].y + points[i + 1].y) / 2;
+                ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+            }
+            ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+            ctx.strokeStyle = '#58a6ff';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // Draw fault points (big red dots with white border)
+            for (let i = 0; i < cumulative.length; i++) {
+                if (faultFlags[i]) {
+                    const x = points[i].x;
+                    const y = points[i].y;
+                    
+                    // Outer glow
+                    ctx.beginPath();
+                    ctx.arc(x, y, 12, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(248, 81, 73, 0.2)';
+                    ctx.fill();
+                    
+                    // White border ring
+                    ctx.beginPath();
+                    ctx.arc(x, y, 8, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fill();
+                    
+                    // Red dot
+                    ctx.beginPath();
+                    ctx.arc(x, y, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = '#f85149';
+                    ctx.fill();
+                }
+            }
+
+            // Axis labels
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '12px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('Step Number', width / 2, height - 5);
+
+            ctx.save();
+            ctx.translate(15, height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Page Faults', 0, 0);
+            ctx.restore();
+        }
+
+        // Add segment
+        function addSegment() {
+            const name = document.getElementById('segName').value.trim();
+            const sizeStr = document.getElementById('segSize').value.trim();
+
+            if (!name) {
+                alert('Input Error: Please enter a segment name.');
+                return;
+            }
+            
+            const size = parseInt(sizeStr);
+            if (!size || size < 1) {
+                alert('Input Error: Segment size must be a positive integer (at least 1 KB).');
+                return;
+            }
+
+            segments.push({ name, size });
+            updateSegmentList();
+            document.getElementById('segName').value = '';
+            document.getElementById('segSize').value = '';
+            document.getElementById('segName').focus();
+            updateStatus(`Added segment: ${name} (${size} KB)`);
+        }
+
+        // Update segment list UI
+        function updateSegmentList() {
+            document.getElementById('segCount').textContent = `${segments.length} segment${segments.length !== 1 ? 's' : ''}`;
+            
+            if (segments.length === 0) {
+                document.getElementById('segList').innerHTML = '<div class="empty-state" style="padding: 20px;">No segments added</div>';
+                return;
+            }
+
+            let html = '';
+            for (const seg of segments) {
+                html += `<div class="segment-item">
+                    <span class="segment-name">${seg.name}</span>
+                    <span class="segment-size">${seg.size} KB</span>
+                </div>`;
+            }
+            document.getElementById('segList').innerHTML = html;
+        }
+
+        // Clear segments
+        function clearSegments() {
+            segments = [];
+            updateSegmentList();
+            document.getElementById('segResultsTable').innerHTML = '<div class="empty-state">Run segmentation to see results</div>';
+            document.getElementById('segStatus').textContent = 'Add segments and run';
+            document.getElementById('segUsed').textContent = '-- KB';
+            document.getElementById('segFree').textContent = '-- KB';
+            document.getElementById('segFrag').textContent = '-- KB';
+            drawMemoryDiagram([]);
+        }
+
+        // Run segmentation
+        function runSegmentation() {
+            if (segments.length === 0) {
+                alert('Input Error: Please add at least one segment.');
+                return;
+            }
+
+            const totalMemStr = document.getElementById('totalMem').value.trim();
+            const totalMem = totalMemStr ? parseInt(totalMemStr) : 512;
+            
+            if (!totalMem || totalMem < 1) {
+                alert('Input Error: Total memory must be a positive integer (at least 1).');
+                return;
+            }
+
+            const runBtn = document.querySelector('#segmentation .btn-primary');
+            runBtn.disabled = true;
+            updateStatus('Running segmentation...');
+
+            setTimeout(() => {
+                try {
+                    const allocations = simulateSegmentation(segments, totalMem);
+                    displaySegResults(allocations, totalMem);
+                    const failedCount = allocations.filter(a => a.status === 'Failed').length;
+                    updateStatus(`Segmentation complete: ${allocations.length} segments processed, ${failedCount} failed`);
+                } catch (e) {
+                    alert('Error: Segmentation failed - ' + e.message);
+                    updateStatus('Segmentation failed');
+                } finally {
+                    runBtn.disabled = false;
+                }
+            }, 50);
+        }
+
+        // Simulate segmentation
+        function simulateSegmentation(segmentList, totalMemory) {
+            const allocations = [];
+            let currentAddr = 0;
+
+            for (const seg of segmentList) {
+                if (currentAddr + seg.size <= totalMemory) {
+                    allocations.push({
+                        name: seg.name,
+                        size: seg.size,
+                        base: currentAddr,
+                        end: currentAddr + seg.size,
+                        status: 'Allocated'
+                    });
+                    currentAddr += seg.size;
+                } else {
+                    allocations.push({
+                        name: seg.name,
+                        size: seg.size,
+                        base: '-',
+                        end: '-',
+                        status: 'Failed'
+                    });
+                }
+            }
+
+            return allocations;
+        }
+
+        // Display segmentation results
+        function displaySegResults(allocations, totalMemory) {
+            const usedMem = allocations.filter(a => a.status === 'Allocated').reduce((sum, a) => sum + a.size, 0);
+            const freeMem = totalMemory - usedMem;
+            const failedCount = allocations.filter(a => a.status === 'Failed').length;
+
+            document.getElementById('segUsed').textContent = `${usedMem} KB`;
+            document.getElementById('segFree').textContent = `${freeMem} KB`;
+            document.getElementById('segFrag').textContent = `${freeMem} KB`;
+            document.getElementById('segStatus').textContent = failedCount > 0 ? `${failedCount} failed` : 'All allocated';
+            document.getElementById('segStatus').style.color = failedCount > 0 ? '#f85149' : '#3fb950';
+
+            let tableHTML = `<table>
+                <thead><tr><th>Segment</th><th>Base Address</th><th>Size (KB)</th><th>End Address</th><th>Status</th></tr></thead><tbody>`;
+            for (const alloc of allocations) {
+                const rowClass = alloc.status === 'Allocated' ? 'allocated-row' : 'failed-row';
+                tableHTML += `<tr class="${rowClass}">
+                    <td>${alloc.name}</td>
+                    <td>${alloc.base}</td>
+                    <td>${alloc.size}</td>
+                    <td>${alloc.end}</td>
+                    <td><strong>${alloc.status}</strong></td>
+                </tr>`;
+            }
+            tableHTML += '</tbody></table>';
+            document.getElementById('segResultsTable').innerHTML = tableHTML;
+
+            drawMemoryDiagram(allocations, totalMemory);
+        }
+
+        // Draw memory diagram
+        function drawMemoryDiagram(allocations, totalMemory = 512) {
+            const canvas = document.getElementById('memoryCanvas');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = 20;
+
+            ctx.clearRect(0, 0, width, height);
+
+            const colors = ['#238636', '#1f6feb', '#a371f7', '#d29922', '#f85149', '#06b6d4', '#ec4899'];
+            const barWidth = width - 2 * padding;
+            const barHeight = height - 2 * padding;
+
+            let currentAddr = 0;
+            let colorIdx = 0;
+
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(padding, padding, barWidth, barHeight);
+
+            for (const alloc of allocations) {
+                if (alloc.status === 'Allocated') {
+                    const segWidth = (alloc.size / totalMemory) * barWidth;
+                    ctx.fillStyle = colors[colorIdx % colors.length];
+                    ctx.fillRect(padding + currentAddr, padding, segWidth - 1, barHeight);
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 11px Inter';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    
+                    const label = segWidth > 50 ? `${alloc.name} (${alloc.size})` : alloc.name;
+                    ctx.fillText(label, padding + currentAddr + segWidth / 2, padding + barHeight / 2);
+                    
+                    currentAddr += segWidth;
+                    colorIdx++;
+                }
+            }
+
+            if (currentAddr < barWidth) {
+                const freeWidth = barWidth - currentAddr;
+                ctx.fillStyle = '#30363d';
+                ctx.fillRect(padding + currentAddr, padding, freeWidth - 1, barHeight);
+                
+                ctx.fillStyle = '#8b949e';
+                ctx.font = 'italic 11px Inter';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`FREE (${Math.round(freeWidth / barWidth * totalMemory)} KB)`, padding + currentAddr + freeWidth / 2, padding + barHeight / 2);
+            }
+
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '10px JetBrains Mono';
+            ctx.textAlign = 'left';
+            ctx.fillText('0', padding - 5, height - 5);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${totalMemory} KB`, width - padding + 5, height - 5);
+        }
+
+        // Run comparison
+        function runComparison() {
+            const pageRef = document.getElementById('compPageRef').value.trim();
+            const numFrames = parseInt(document.getElementById('compFrames').value);
+
+            if (!pageRef) {
+                alert('Input Error: Please enter a page reference string.');
+                return;
+            }
+
+            const pages = parsePageRef(pageRef);
+            if (!pages || pages.length === 0) {
+                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
+                return;
+            }
+
+            if (!numFrames || numFrames < 1) {
+                alert('Input Error: Number of frames must be a positive integer (at least 1).');
+                return;
+            }
+
+            const compareBtn = document.querySelector('#comparison .btn-primary');
+            compareBtn.disabled = true;
+            compareBtn.textContent = 'Comparing...';
+            updateStatus('Running comparison...');
+
+            setTimeout(() => {
+                try {
+                    const lruResult = simulateLRU(pages, numFrames);
+                    const optResult = simulateOptimal(pages, numFrames);
+                    displayComparison(pages, lruResult, optResult, numFrames);
+                    updateStatus(`Comparison complete: LRU=${lruResult.totalFaults} faults, Optimal=${optResult.totalFaults} faults`);
+                } catch (e) {
+                    alert('Error: Comparison failed - ' + e.message);
+                    updateStatus('Comparison failed');
+                } finally {
+                    compareBtn.disabled = false;
+                    compareBtn.textContent = 'Compare Algorithms';
+                }
+            }, 50);
+        }
+
+        // Reset comparison tab
+        function resetComparison() {
+            document.getElementById('compPageRef').value = '';
+            document.getElementById('compFrames').value = '';
+            document.getElementById('compLruFaults').textContent = '--';
+            document.getElementById('compLruHit').textContent = '--';
+            document.getElementById('compLruEff').textContent = '--';
+            document.getElementById('compOptFaults').textContent = '--';
+            document.getElementById('compOptHit').textContent = '--';
+            document.getElementById('compOptEff').textContent = '--';
+            document.getElementById('analysisBox').textContent = 'Run a comparison to see analysis';
+            document.getElementById('analysisBox').className = 'analysis-box';
+            document.getElementById('compTable').innerHTML = '<div class="empty-state">Run a comparison to see step-by-step execution</div>';
+            drawCompChart(0, 0);
+            updateStatus('Comparison tab reset');
+        }
+
+        // Display comparison results
+        function displayComparison(pages, lruResult, optResult, numFrames) {
+            const { frameSnapshots: lruSnapshots, faultFlags: lruFaults, totalFaults: lruTotal } = lruResult;
+            const { frameSnapshots: optSnapshots, faultFlags: optFaults, totalFaults: optTotal } = optResult;
+
+            const total = pages.length;
+            const lruHits = total - lruTotal;
+            const optHits = total - optTotal;
+            const lruHitRatio = ((lruHits / total) * 100).toFixed(1);
+            const optHitRatio = ((optHits / total) * 100).toFixed(1);
+            const lruEff = lruTotal > 0 ? ((lruHits / lruTotal) * 100).toFixed(1) + '%' : 'N/A';
+            const optEff = optTotal > 0 ? ((optHits / optTotal) * 100).toFixed(1) + '%' : 'N/A';
+
+            document.getElementById('compLruFaults').textContent = lruTotal;
+            document.getElementById('compLruHit').textContent = lruHitRatio + '%';
+            document.getElementById('compLruEff').textContent = lruEff;
+
+            document.getElementById('compOptFaults').textContent = optTotal;
+            document.getElementById('compOptHit').textContent = optHitRatio + '%';
+            document.getElementById('compOptEff').textContent = optEff;
+
+            drawCompChart(lruTotal, optTotal);
+
+            let analysis = '';
+            let analysisClass = 'analysis-box';
+            if (optTotal < lruTotal) {
+                const diff = lruTotal - optTotal;
+                const pct = ((diff / lruTotal) * 100).toFixed(1);
+                analysis = `Optimal algorithm produced ${diff} fewer page faults than LRU (${pct}% improvement)`;
+                analysisClass += ' positive';
+            } else if (lruTotal < optTotal) {
+                const diff = optTotal - lruTotal;
+                const pct = ((diff / optTotal) * 100).toFixed(1);
+                analysis = `LRU algorithm produced ${diff} fewer page faults than Optimal (${pct}% improvement)`;
+            } else {
+                analysis = 'Both algorithms produced the same number of page faults';
+            }
+            const analysisBox = document.getElementById('analysisBox');
+            analysisBox.textContent = analysis;
+            analysisBox.className = analysisClass;
+
+            let tableHTML = `<table>
+                <thead><tr><th>Step</th><th>Page</th><th>LRU Frames</th><th>LRU Fault</th><th>Optimal Frames</th><th>Optimal Fault</th></tr></thead><tbody>`;
+
+            for (let i = 0; i < pages.length; i++) {
+                let rowClass = '';
+                if (lruFaults[i] && optFaults[i]) rowClass = 'both-fault-row';
+                else if (lruFaults[i]) rowClass = 'lru-fault-row';
+                else if (optFaults[i]) rowClass = 'opt-fault-row';
+                else rowClass = 'both-hit-row';
+
+                tableHTML += `<tr class="${rowClass}">
+                    <td>${i + 1}</td>
+                    <td>${pages[i]}</td>
+                    <td>[${lruSnapshots[i].join(', ')}]</td>
+                    <td><strong>${lruFaults[i] ? 'FAULT' : 'HIT'}</strong></td>
+                    <td>[${optSnapshots[i].join(', ')}]</td>
+                    <td><strong>${optFaults[i] ? 'FAULT' : 'HIT'}</strong></td>
+                </tr>`;
+            }
+            tableHTML += '</tbody></table>';
+            document.getElementById('compTable').innerHTML = tableHTML;
+        }
+
+        // Draw comparison bar chart
+        function drawCompChart(lruFaults, optFaults) {
+            const canvas = document.getElementById('compChart');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = { top: 50, right: 40, bottom: 60, left: 60 };
+
+            ctx.clearRect(0, 0, width, height);
+
+            const maxY = Math.max(lruFaults, optFaults, 1) + 2;
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            const barWidth = Math.min(120, chartWidth * 0.35);
+            const gap = (chartWidth - 2 * barWidth) / 3;
+
+            const lruX = padding.left + gap;
+            const optX = padding.left + gap + barWidth + gap;
+
+            const lruHeight = (lruFaults / maxY) * chartHeight;
+            const optHeight = (optFaults / maxY) * chartHeight;
+
+            const lruBottom = padding.top + chartHeight;
+            const lruTop = lruBottom - lruHeight;
+            const optTop = lruBottom - optHeight;
+
+            // Draw horizontal grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= maxY; i++) {
+                const y = padding.top + chartHeight - (i / maxY) * chartHeight;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#8b949e';
+                ctx.font = '11px Inter';
+                ctx.textAlign = 'right';
+                ctx.fillText(i, padding.left - 10, y + 4);
+            }
+
+            // Chart title
+            ctx.fillStyle = '#e6edf3';
+            ctx.font = 'bold 16px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('Page Faults Comparison', width / 2, 25);
+
+            // Draw glow effects under bars
+            ctx.shadowColor = '#f97316';
+            ctx.shadowBlur = 30;
+            ctx.fillStyle = 'rgba(249, 115, 22, 0.3)';
+            roundRect(ctx, lruX - 10, lruBottom + 5, barWidth + 20, 15, 5);
+            ctx.fill();
+            
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 30;
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+            roundRect(ctx, optX - 10, lruBottom + 5, barWidth + 20, 15, 5);
+            ctx.fill();
+            
+            ctx.shadowBlur = 0;
+
+            // Draw LRU bar with gradient
+            const lruGradient = ctx.createLinearGradient(0, lruTop, 0, lruBottom);
+            lruGradient.addColorStop(0, '#f97316');
+            lruGradient.addColorStop(0.5, '#ea580c');
+            lruGradient.addColorStop(1, '#c2410c');
+            
+            ctx.fillStyle = lruGradient;
+            roundRect(ctx, lruX, lruTop, barWidth, lruHeight, [15, 15, 0, 0]);
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            roundRect(ctx, lruX, lruTop, barWidth, lruHeight, [15, 15, 0, 0]);
+            ctx.stroke();
+
+            // Draw Optimal bar with gradient
+            const optGradient = ctx.createLinearGradient(0, optTop, 0, lruBottom);
+            optGradient.addColorStop(0, '#3b82f6');
+            optGradient.addColorStop(0.5, '#2563eb');
+            optGradient.addColorStop(1, '#1d4ed8');
+            
+            ctx.fillStyle = optGradient;
+            roundRect(ctx, optX, optTop, barWidth, optHeight, [15, 15, 0, 0]);
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            roundRect(ctx, optX, optTop, barWidth, optHeight, [15, 15, 0, 0]);
+            ctx.stroke();
+
+            // Value labels on top of bars
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 22px Inter';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 4;
+            ctx.fillText(lruFaults, lruX + barWidth / 2, lruTop - 12);
+            ctx.fillText(optFaults, optX + barWidth / 2, optTop - 12);
+            ctx.shadowBlur = 0;
+
+            // X-axis labels
+            ctx.fillStyle = '#8b949e';
+            ctx.font = 'bold 14px Inter';
+            ctx.fillText('LRU', lruX + barWidth / 2, lruBottom + 25);
+            ctx.fillText('Optimal', optX + barWidth / 2, lruBottom + 25);
+
+            // Axis label
+            ctx.fillStyle = '#6e7681';
+            ctx.font = '11px Inter';
+            ctx.fillText('Algorithm', width / 2, height - 10);
+        }
+
+        function roundRect(ctx, x, y, width, height, radii) {
+            if (!Array.isArray(radii)) {
+                radii = [radii, radii, radii, radii];
+            }
+            const [tl, tr, br, bl] = radii;
+            ctx.beginPath();
+            ctx.moveTo(x + tl, y);
+            ctx.lineTo(x + width - tr, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + tr);
+            ctx.lineTo(x + width, y + height - br);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - br, y + height);
+            ctx.lineTo(x + bl, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - bl);
+            ctx.lineTo(x, y + tl);
+            ctx.quadraticCurveTo(x, y, x + tl, y);
+            ctx.closePath();
+        }
+
+        // Initialize memory diagram
+        drawMemoryDiagram([]);
+        updateStatus('Ready - Select a tab to begin');
+    </script>
+</body>
+</html>
