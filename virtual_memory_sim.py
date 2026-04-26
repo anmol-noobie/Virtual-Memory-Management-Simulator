@@ -844,6 +844,14 @@ class VirtualMemoryApp:
                    self._clear_segments, '#da3633', '#f85149').pack(
             fill='x', pady=(0, 4))
 
+        # NEW: presentation helpers
+        styled_btn(bf, '📋  Load Demo Preset',
+                   self._load_demo_preset, '#1f6feb', '#388bfd').pack(
+            fill='x', pady=(0, 4))
+        styled_btn(bf, '⚖  Compare All 3 Strategies',
+                   self._run_strategy_comparison, '#a371f7', '#b285f9').pack(
+            fill='x', pady=(0, 4))
+
         # Compact button (disabled until a run happens)
         self._compact_btn = styled_btn(
             bf, '⚡ Compact Memory',
@@ -853,7 +861,11 @@ class VirtualMemoryApp:
                                   bg='#21262d', fg='#484f58')
 
         tk.Label(bf,
-                 text='Compaction merges scattered free holes into\none contiguous block at the cost of copying.',
+                 text=('Demo Preset fills the testcase in one click.\n'
+                       'Compare All 3 runs First / Best / Worst Fit on the\n'
+                       'same input and shows them side-by-side.\n'
+                       'Compaction merges scattered free holes into one\n'
+                       'contiguous block at the cost of copying.'),
                  font=('Inter', 7), bg=BG_CARD, fg=COL_GRAY,
                  justify='left').pack(anchor='w', pady=(4, 0))
 
@@ -1284,6 +1296,209 @@ class VirtualMemoryApp:
         self._set_status(
             f'Compaction complete — free space merged '
             f'{largest_before} KB → {free_total} KB contiguous')
+
+    # ── NEW: Demo preset & 3-strategy comparison ─────────────────
+
+    def _load_demo_preset(self):
+        """One-click setup for a presentation."""
+        # Total memory
+        try:
+            self._tm_e.delete(0, tk.END)
+            self._tm_e.insert(0, '512')
+            self._tm_e.config(fg=TXT_PRI)
+        except Exception:
+            pass
+        # Initial occupied blocks
+        try:
+            self._ib_e.delete(0, tk.END)
+            self._ib_e.insert(0, '100-140, 200-260, 320-360')
+            self._ib_e.config(fg=TXT_PRI)
+        except Exception:
+            pass
+        # Segments
+        self.segments = [
+            {'name': 'S1', 'size': 30},
+            {'name': 'S2', 'size': 40},
+            {'name': 'S3', 'size': 20},
+            {'name': 'S4', 'size': 50},
+        ]
+        self._refresh_seg_list()
+        self.last_seg_result = None
+        for w in self._seg_tree_frame.winfo_children():
+            w.destroy()
+        tk.Label(self._seg_tree_frame,
+                 text='Run segmentation (or "Compare All 3") to see results',
+                 font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY,
+                 pady=30).pack()
+        self._seg_draw_empty()
+        try:
+            self._compact_frame.pack_forget()
+        except Exception:
+            pass
+        self._compact_btn.config(state='disabled', bg='#21262d', fg='#484f58')
+        self._set_status('Demo preset loaded — 4 segments, 3 pre-allocated holes')
+
+    def _run_strategy_comparison(self):
+        """Run First/Best/Worst Fit on the same input and show them
+        side-by-side in a popup window with three memory bars and a
+        stats summary table."""
+        if not self.segments:
+            messagebox.showerror(
+                'Error',
+                'Please add at least one segment (or click "Load Demo Preset").')
+            return
+        tm_str = get_entry(self._tm_e, '512').strip()
+        try:
+            total_mem = int(tm_str) if tm_str else 512
+            assert total_mem >= 1
+        except Exception:
+            messagebox.showerror('Error', 'Total memory must be a positive integer.')
+            return
+
+        ib_text = get_entry(self._ib_e, 'e.g. 100-200, 350-450').strip()
+        try:
+            occupied = parse_initial_blocks(ib_text, total_mem)
+        except ValueError as e:
+            messagebox.showerror('Error', str(e))
+            return
+
+        # Run all three
+        results = []
+        for key, label, accent in [
+            ('first', 'First Fit', '#3fb950'),
+            ('best',  'Best Fit',  '#1f6feb'),
+            ('worst', 'Worst Fit', '#f85149'),
+        ]:
+            allocs, stats, free_list = simulate_segmentation(
+                self.segments, total_mem, key, occupied_blocks=occupied)
+            largest_hole = max((h['size'] for h in free_list), default=0)
+            failed = sum(1 for a in allocs if a['status'] == 'Failed')
+            results.append({
+                'key': key, 'label': label, 'accent': accent,
+                'allocs': allocs, 'stats': stats,
+                'free_list': free_list, 'largest_hole': largest_hole,
+                'failed': failed,
+            })
+
+        # Popup window
+        win = tk.Toplevel(self)
+        win.title('Strategy Comparison — First / Best / Worst Fit')
+        win.configure(bg=BG_DARK)
+        win.geometry('1080x780')
+
+        tk.Label(win,
+                 text='Strategy Comparison — same input, three policies',
+                 font=('Inter', 13, 'bold'),
+                 bg=BG_DARK, fg=TXT_PRI).pack(anchor='w', padx=20, pady=(16, 4))
+        tk.Label(win,
+                 text=('All three runs use the SAME segments, total memory, '
+                       'and pre-allocated blocks. Differences in Base Addr, '
+                       'Largest Free Hole, and Failed count are caused entirely '
+                       'by the choice of fit policy.'),
+                 font=('Inter', 9), bg=BG_DARK, fg=COL_GRAY,
+                 wraplength=1020, justify='left').pack(anchor='w', padx=20, pady=(0, 10))
+
+        # Three memory bars in a single matplotlib figure
+        fig = Figure(figsize=(10, 4.6), facecolor=BG_CARD)
+        for i, r in enumerate(results):
+            ax = fig.add_subplot(3, 1, i + 1)
+            self._render_compare_bar(ax, r['allocs'], total_mem, r['label'])
+        fig.tight_layout(pad=1.4)
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill='x', padx=20, pady=(0, 12))
+
+        # Stats summary table
+        table_frame = tk.Frame(win, bg=BG_CARD,
+                               highlightthickness=1, highlightbackground=BDR)
+        table_frame.pack(fill='x', padx=20, pady=(0, 12))
+
+        cols = ['Strategy', 'Used (KB)', 'Free (KB)',
+                'Free Holes', 'Largest Free Hole', 'Failed']
+        tv = ttk.Treeview(table_frame, columns=cols, show='headings',
+                          style='Dark.Treeview', height=4)
+        widths = [120, 90, 90, 90, 150, 80]
+        for c, w in zip(cols, widths):
+            tv.heading(c, text=c)
+            tv.column(c, width=w, anchor='center')
+        tv.tag_configure('first', foreground='#3fb950')
+        tv.tag_configure('best',  foreground='#1f6feb')
+        tv.tag_configure('worst', foreground='#f85149')
+        for r in results:
+            tv.insert('', tk.END,
+                      values=[r['label'],
+                              r['stats']['used_memory'],
+                              r['stats']['free_memory'],
+                              len(r['free_list']),
+                              r['largest_hole'],
+                              r['failed']],
+                      tags=(r['key'],))
+        tv.pack(fill='x')
+
+        tk.Button(win, text='Close', command=win.destroy,
+                  bg='#21262d', fg=TXT_PRI, activebackground='#30363d',
+                  relief=tk.FLAT, bd=0, cursor='hand2',
+                  font=('Inter', 10), padx=18, pady=6).pack(pady=(0, 16))
+
+        self._set_status('Comparison ready — First / Best / Worst Fit on the same input')
+
+    def _render_compare_bar(self, ax, allocs, total_mem, title):
+        """Draw one labeled memory bar onto the given matplotlib axis,
+        positioning each block at its real base address."""
+        ax.set_facecolor('#0d1117')
+        ax.set_xlim(0, total_mem)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
+        ax.set_xticks([0, total_mem])
+        ax.tick_params(colors=COL_GRAY, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color('#30363d')
+        ax.set_title(title, color=TXT_PRI, fontsize=10,
+                     loc='left', pad=4, fontweight='bold')
+
+        PRE_COLOUR = '#475569'
+        FREE_COLOUR = '#30363d'
+
+        placed = sorted(
+            [a for a in allocs
+             if a['status'] in ('Allocated', 'Pre-allocated')
+             and isinstance(a['base'], int)],
+            key=lambda x: x['base'])
+
+        cursor = 0
+        ci = 0
+        for a in placed:
+            if a['base'] > cursor:
+                gap = a['base'] - cursor
+                ax.add_patch(mpatches.Rectangle(
+                    (cursor, 0.1), gap, 0.8, color=FREE_COLOUR))
+                if gap > total_mem * 0.06:
+                    ax.text(cursor + gap / 2, 0.5,
+                            f'FREE\n{gap} KB',
+                            ha='center', va='center',
+                            color=COL_GRAY, fontsize=7, style='italic')
+            if a['status'] == 'Pre-allocated':
+                colour = PRE_COLOUR
+            else:
+                colour = SEG_COLOURS[ci % len(SEG_COLOURS)]
+                ci += 1
+            ax.add_patch(mpatches.Rectangle(
+                (a['base'], 0.1), a['size'], 0.8, color=colour))
+            if a['size'] > total_mem * 0.05:
+                ax.text(a['base'] + a['size'] / 2, 0.5,
+                        f'{a["name"]}\n{a["size"]}KB',
+                        ha='center', va='center',
+                        color='white', fontsize=7, fontweight='bold')
+            cursor = a['end']
+        if cursor < total_mem:
+            gap = total_mem - cursor
+            ax.add_patch(mpatches.Rectangle(
+                (cursor, 0.1), gap, 0.8, color=FREE_COLOUR))
+            if gap > total_mem * 0.06:
+                ax.text(cursor + gap / 2, 0.5,
+                        f'FREE\n{gap} KB',
+                        ha='center', va='center',
+                        color=COL_GRAY, fontsize=7, style='italic')
 
     def _draw_compact_bar(self, ax, canvas, value, total, colour, label):
         ax.clear()

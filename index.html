@@ -835,6 +835,22 @@
                                 <button class="btn btn-danger" onclick="clearSegments()">Clear</button>
                             </div>
 
+                            <!-- ── NEW: Presentation helpers ── -->
+                            <button class="btn"
+                                    style="margin-top: 10px; width: 100%; background:#1f6feb; color:#fff;"
+                                    onclick="loadDemoPreset()">
+                                📋 Load Demo Preset
+                            </button>
+                            <button class="btn"
+                                    style="margin-top: 8px; width: 100%; background:#a371f7; color:#fff;"
+                                    onclick="runStrategyComparison()">
+                                ⚖️ Compare All 3 Strategies
+                            </button>
+                            <div style="margin-top: 6px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                                <strong>Demo Preset</strong> fills the testcase in one click.
+                                <strong>Compare All 3</strong> runs First / Best / Worst Fit on the same input and shows them side-by-side.
+                            </div>
+
                             <!-- ── NEW: Compact Memory button ── -->
                             <button class="btn btn-compact" id="compactBtn"
                                     style="margin-top: 10px; width: 100%;"
@@ -944,6 +960,20 @@
                         </div>
                         <div style="margin-top: 10px; font-size: 11px; color: #6e7681; line-height: 1.5;">
                             <strong>Note:</strong> Compaction is expensive — the OS must copy every byte of allocated memory. Addresses in every segment's base register must also be updated. Modern systems avoid it by using paging instead.
+                        </div>
+                    </div>
+
+                    <!-- ── NEW: Side-by-side strategy comparison ── -->
+                    <div id="strategyCompare" style="display:none; margin-top:16px; padding:16px; background:#161b22; border:1px solid #30363d; border-radius:8px;">
+                        <div style="font-size:13px; font-weight:600; color:#f0f6fc; margin-bottom:12px;">
+                            Strategy Comparison — same input, three policies
+                        </div>
+                        <div id="strategyCompareBars"></div>
+                        <div id="strategyCompareTable" style="margin-top:14px;"></div>
+                        <div style="margin-top:10px; font-size:11px; color:#6e7681; line-height:1.5;">
+                            All three runs use the SAME segments, total memory, and pre-allocated blocks.
+                            The differences in <strong>Base Addr</strong>, <strong>Largest Free Hole</strong>, and <strong>Failed</strong> count
+                            are caused entirely by the choice of fit policy.
                         </div>
                     </div>
                 </div>
@@ -1508,6 +1538,8 @@
             document.getElementById('segFrag').textContent = '-- KB';
             document.getElementById('compactBtn').disabled = true;
             document.getElementById('compactDiff').classList.remove('visible');
+            const cmp = document.getElementById('strategyCompare');
+            if (cmp) cmp.style.display = 'none';
             drawMemoryDiagram([]);
             updateStatus('Segmentation cleared');
         }
@@ -1766,6 +1798,169 @@
             document.getElementById('cStatGain').textContent   = gained > 0 ? `+${gained} KB` : `${gained} KB`;
 
             updateStatus(`Compaction complete: free space merged from ${largestBefore} KB → ${contiguousAfter} KB contiguous`);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════
+        //  NEW: Demo preset & 3-strategy comparison
+        // ══════════════════════════════════════════════════════════════════════════
+
+        /**
+         * One-click setup for a presentation: fills total memory, initial
+         * occupied blocks, and 4 segments that produce visibly different
+         * placements under First / Best / Worst Fit.
+         */
+        function loadDemoPreset() {
+            document.getElementById('totalMem').value = 512;
+            document.getElementById('initialBlocks').value = '100-140, 200-260, 320-360';
+            segments = [
+                { name: 'S1', size: 30 },
+                { name: 'S2', size: 40 },
+                { name: 'S3', size: 20 },
+                { name: 'S4', size: 50 },
+            ];
+            updateSegmentList();
+            // Reset any previous results
+            document.getElementById('segResultsTable').innerHTML =
+                '<div class="empty-state">Run segmentation to see results</div>';
+            document.getElementById('compactDiff').classList.remove('visible');
+            const cmp = document.getElementById('strategyCompare');
+            if (cmp) cmp.style.display = 'none';
+            drawMemoryDiagram([]);
+            updateStatus('Demo preset loaded — 4 segments, 3 pre-allocated holes');
+        }
+
+        /**
+         * Renders one mini horizontal memory bar (pure DOM, no canvas) for the
+         * comparison panel. Uses real base addresses so allocations look
+         * exactly the same as the main canvas.
+         */
+        function _renderCompareBar(allocations, totalMemory) {
+            const colors = ['#238636','#1f6feb','#a371f7','#d29922','#f85149','#06b6d4','#ec4899'];
+            const PRE = '#475569', FREE = '#30363d';
+
+            const placed = allocations
+                .filter(a => (a.status === 'Allocated' || a.status === 'Pre-allocated')
+                          && typeof a.base === 'number')
+                .slice()
+                .sort((a, b) => a.base - b.base);
+
+            const segs = [];   // {start, size, fill, label}
+            let cursor = 0, ci = 0;
+            for (const a of placed) {
+                if (a.base > cursor) {
+                    segs.push({ start: cursor, size: a.base - cursor, fill: FREE, label: 'FREE' });
+                }
+                if (a.status === 'Pre-allocated') {
+                    segs.push({ start: a.base, size: a.size, fill: PRE, label: a.name });
+                } else {
+                    segs.push({ start: a.base, size: a.size, fill: colors[ci % colors.length], label: a.name });
+                    ci++;
+                }
+                cursor = a.end;
+            }
+            if (cursor < totalMemory) {
+                segs.push({ start: cursor, size: totalMemory - cursor, fill: FREE, label: 'FREE' });
+            }
+
+            return segs.map(s => {
+                const pct = (s.size / totalMemory) * 100;
+                const isFree = s.fill === FREE;
+                const txtColor = isFree ? '#8b949e' : '#fff';
+                return `<div title="${s.label} • base ${s.start} • ${s.size} KB"
+                             style="flex:0 0 ${pct}%; background:${s.fill};
+                                    border-right:1px solid #0d1117;
+                                    display:flex; align-items:center; justify-content:center;
+                                    overflow:hidden; font-size:10px; font-weight:600;
+                                    color:${txtColor}; white-space:nowrap;">
+                            ${pct > 4 ? s.label : ''}
+                        </div>`;
+            }).join('');
+        }
+
+        /**
+         * Runs the same input under all three fit policies and renders a
+         * comparison panel showing one memory bar per strategy plus a small
+         * stats table (largest free hole / external fragmentation / failed).
+         */
+        function runStrategyComparison() {
+            if (segments.length === 0) {
+                alert('Please add at least one segment (or click "Load Demo Preset").');
+                return;
+            }
+            const tmStr = document.getElementById('totalMem').value.trim();
+            const totalMem = tmStr ? parseInt(tmStr) : 512;
+            if (!totalMem || totalMem < 1) { alert('Total memory must be a positive integer.'); return; }
+
+            let occupied;
+            try {
+                occupied = parseInitialBlocks(document.getElementById('initialBlocks').value, totalMem);
+            } catch (e) { alert(e.message); return; }
+
+            const strategies = [
+                { key: 'first', label: 'First Fit',  color: '#3fb950' },
+                { key: 'best',  label: 'Best Fit',   color: '#1f6feb' },
+                { key: 'worst', label: 'Worst Fit',  color: '#f85149' },
+            ];
+
+            // Build the bars
+            let barsHTML = '';
+            const stats = [];
+            for (const s of strategies) {
+                const allocs = simulateSegmentation(segments, totalMem, s.key, occupied);
+                const free   = allocs._freeList || [];
+                const used   = allocs.filter(a => a.status === 'Allocated' || a.status === 'Pre-allocated')
+                                     .reduce((sum, a) => sum + a.size, 0);
+                const failed = allocs.filter(a => a.status === 'Failed').length;
+                const largestHole = free.reduce((m, h) => Math.max(m, h.size), 0);
+                stats.push({ ...s, used, free: totalMem - used, largestHole, failed, holes: free.length });
+
+                barsHTML += `
+                    <div style="margin-bottom:14px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <span style="display:inline-block; width:10px; height:10px; background:${s.color}; border-radius:2px;"></span>
+                            <strong style="color:#f0f6fc; font-size:12px;">${s.label}</strong>
+                            <span style="color:#8b949e; font-size:11px;">
+                                — used ${used} KB, free ${totalMem - used} KB, largest hole ${largestHole} KB${failed ? `, ${failed} failed` : ''}
+                            </span>
+                        </div>
+                        <div style="display:flex; height:34px; background:#0d1117;
+                                    border:1px solid #30363d; border-radius:4px; overflow:hidden;">
+                            ${_renderCompareBar(allocs, totalMem)}
+                        </div>
+                    </div>`;
+            }
+            document.getElementById('strategyCompareBars').innerHTML = barsHTML;
+
+            // Build the stats table
+            let tableHTML = `<table style="width:100%; font-size:12px; border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#0d1117; color:#8b949e;">
+                        <th style="text-align:left; padding:8px; border-bottom:1px solid #30363d;">Strategy</th>
+                        <th style="text-align:right; padding:8px; border-bottom:1px solid #30363d;">Used (KB)</th>
+                        <th style="text-align:right; padding:8px; border-bottom:1px solid #30363d;">Free (KB)</th>
+                        <th style="text-align:right; padding:8px; border-bottom:1px solid #30363d;">Free Holes</th>
+                        <th style="text-align:right; padding:8px; border-bottom:1px solid #30363d;">Largest Free Hole</th>
+                        <th style="text-align:right; padding:8px; border-bottom:1px solid #30363d;">Failed</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+            for (const r of stats) {
+                tableHTML += `
+                    <tr>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; color:${r.color}; font-weight:600;">${r.label}</td>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; text-align:right; color:#f0f6fc;">${r.used}</td>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; text-align:right; color:#f0f6fc;">${r.free}</td>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; text-align:right; color:#f0f6fc;">${r.holes}</td>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; text-align:right; color:#f0f6fc;">${r.largestHole}</td>
+                        <td style="padding:8px; border-bottom:1px solid #21262d; text-align:right; color:${r.failed ? '#f85149' : '#3fb950'};">${r.failed}</td>
+                    </tr>`;
+            }
+            tableHTML += '</tbody></table>';
+            document.getElementById('strategyCompareTable').innerHTML = tableHTML;
+
+            document.getElementById('strategyCompare').style.display = 'block';
+            document.getElementById('strategyCompare').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            updateStatus('Comparison ready — First / Best / Worst Fit on the same input');
         }
 
         // ══════════════════════════════════════════════════════════════════════════
