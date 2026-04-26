@@ -91,27 +91,84 @@ def simulate_optimal(pages, num_frames):
     return frame_snapshots, fault_flags, total_faults
 
 
-def simulate_segmentation(segments, total_memory=512, strategy='first'):
+def parse_initial_blocks(text, total_memory):
+    """Parse a string like '100-200, 350-450' into a sorted list of
+    pre-allocated block dicts. Raises ValueError on bad input.
+    """
+    if not text or not text.strip():
+        return []
+    parts = [p.strip() for p in text.replace(';', ',').split(',') if p.strip()]
+    blocks = []
+    for i, p in enumerate(parts):
+        try:
+            a, b = p.split('-')
+            start, end = int(a.strip()), int(b.strip())
+        except Exception:
+            raise ValueError(
+                f'Initial block "{p}" is not in the form start-end (e.g. 100-200).')
+        if end <= start:
+            raise ValueError(f'Initial block "{p}" must have end > start.')
+        if start < 0 or end > total_memory:
+            raise ValueError(
+                f'Initial block "{p}" is outside 0..{total_memory}.')
+        blocks.append({
+            'name': f'P{i + 1}',
+            'base': start,
+            'size': end - start,
+            'end': end,
+            'hole_size': None,
+            'status': 'Pre-allocated',
+        })
+    blocks.sort(key=lambda b: b['base'])
+    for i in range(1, len(blocks)):
+        if blocks[i]['base'] < blocks[i - 1]['end']:
+            raise ValueError(
+                f'Initial blocks overlap: '
+                f'{blocks[i-1]["base"]}-{blocks[i-1]["end"]} and '
+                f'{blocks[i]["base"]}-{blocks[i]["end"]}.')
+    return blocks
+
+
+def _free_list_from_occupied(occupied, total_memory):
+    """Build the initial free list from sorted pre-occupied blocks."""
+    free = []
+    cursor = 0
+    for b in occupied:
+        if b['base'] > cursor:
+            free.append({'start': cursor, 'size': b['base'] - cursor})
+        cursor = b['end']
+    if cursor < total_memory:
+        free.append({'start': cursor, 'size': total_memory - cursor})
+    return free
+
+
+def simulate_segmentation(segments, total_memory=512, strategy='first',
+                          occupied_blocks=None):
     """Segmentation with pluggable allocation strategy.
 
     Args:
-        segments   : list of {'name': str, 'size': int}
-        total_memory: int  – total KB
-        strategy   : 'first' | 'best' | 'worst'
+        segments        : list of {'name': str, 'size': int}
+        total_memory    : int  – total KB
+        strategy        : 'first' | 'best' | 'worst'
+        occupied_blocks : list of pre-allocated block dicts produced by
+                          parse_initial_blocks(). When non-empty, the
+                          initial free list contains MULTIPLE holes,
+                          which is what makes the three strategies
+                          produce visibly different placements.
 
     Returns:
         (allocations, stats, free_list_after)
-
-        allocations : list of dicts
-            { name, size, base, end, hole_size, status }
-        stats : dict
-            { total_memory, used_memory, free_memory,
-              external_fragmentation, largest_free_before }
-        free_list_after : list of {start, size}
+        allocations contains the pre-allocated blocks (in address order)
+        followed by one entry per requested segment.
     """
-    # Free list represented as [{start, size}, ...]
-    free_list = [{'start': 0, 'size': total_memory}]
-    allocations = []
+    occupied_blocks = occupied_blocks or []
+
+    # Free list built around the pre-allocated regions
+    free_list = _free_list_from_occupied(occupied_blocks, total_memory)
+
+    # Pre-allocated entries appear first so the table & visualisation
+    # show the starting state.
+    allocations = [dict(b) for b in occupied_blocks]
 
     for seg in segments:
         candidates = [
@@ -132,11 +189,14 @@ def simulate_segmentation(segments, total_memory=512, strategy='first'):
             continue
 
         if strategy == 'first':
+            # Lowest start address
             chosen = min(candidates, key=lambda h: h['start'])
         elif strategy == 'best':
-            chosen = min(candidates, key=lambda h: h['size'])
+            # Smallest hole that fits (ties broken by lower address)
+            chosen = min(candidates, key=lambda h: (h['size'], h['start']))
         else:  # worst
-            chosen = max(candidates, key=lambda h: h['size'])
+            # Largest hole (ties broken by lower address)
+            chosen = max(candidates, key=lambda h: (h['size'], -h['start']))
 
         base = chosen['start']
         allocations.append({
@@ -152,11 +212,13 @@ def simulate_segmentation(segments, total_memory=512, strategy='first'):
         remaining = chosen['size'] - seg['size']
         idx = chosen['idx']
         if remaining > 0:
-            free_list[idx] = {'start': chosen['start'] + seg['size'], 'size': remaining}
+            free_list[idx] = {'start': chosen['start'] + seg['size'],
+                              'size': remaining}
         else:
             free_list.pop(idx)
 
-    used = sum(a['size'] for a in allocations if a['status'] == 'Allocated')
+    used = sum(a['size'] for a in allocations
+               if a['status'] in ('Allocated', 'Pre-allocated'))
     free = total_memory - used
     largest_before = max((h['size'] for h in free_list), default=0)
 
@@ -738,6 +800,22 @@ class VirtualMemoryApp:
         self._tm_wrap, self._tm_e = styled_entry(f, '512', 30)
         self._tm_wrap.pack(fill='x', pady=(0, 6))
 
+        # ── NEW: Initial Occupied Blocks input ────────────────────
+        Label(f, 'Initial Occupied Blocks (optional)', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._ib_wrap, self._ib_e = styled_entry(f, 'e.g. 100-200, 350-450', 30)
+        self._ib_wrap.pack(fill='x', pady=(0, 2))
+        tk.Label(
+            f,
+            text=('Comma-separated start-end ranges in KB.\n'
+                  'These regions are marked as already in use\n'
+                  'BEFORE allocation, creating multiple free\n'
+                  'holes so First/Best/Worst Fit produce\n'
+                  'visibly different results. Leave empty for\n'
+                  'a single empty memory.'),
+            font=('Inter', 7), bg=BG_CARD, fg=COL_GRAY,
+            justify='left', wraplength=260).pack(anchor='w', pady=(0, 6))
+
         # ── Fit Strategy dropdown ─────────────────────────────────
         Label(f, 'Fit Strategy', size=9, bold=True,
               colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
@@ -929,6 +1007,13 @@ class VirtualMemoryApp:
         self.segments = []
         self.last_seg_result = None
         self._refresh_seg_list()
+        # Clear the new initial-blocks field too
+        try:
+            self._ib_e.delete(0, tk.END)
+            self._ib_e.insert(0, 'e.g. 100-200, 350-450')
+            self._ib_e.config(fg=COL_GRAY)
+        except Exception:
+            pass
         for w in self._seg_tree_frame.winfo_children():
             w.destroy()
         tk.Label(self._seg_tree_frame,
@@ -955,17 +1040,25 @@ class VirtualMemoryApp:
             messagebox.showerror('Error', 'Total memory must be a positive integer.')
             return
 
+        # Parse the optional pre-allocated blocks
+        ib_text = get_entry(self._ib_e, 'e.g. 100-200, 350-450').strip()
+        try:
+            occupied = parse_initial_blocks(ib_text, total_mem)
+        except ValueError as e:
+            messagebox.showerror('Error', str(e))
+            return
+
         strategy_map = {'First Fit': 'first', 'Best Fit': 'best', 'Worst Fit': 'worst'}
         strategy = strategy_map[self._fit_var.get()]
 
         self._set_status('Running segmentation…')
         allocs, stats, free_list = simulate_segmentation(
-            self.segments, total_mem, strategy)
+            self.segments, total_mem, strategy, occupied_blocks=occupied)
 
         self.last_seg_result = {
             'allocs': allocs, 'stats': stats,
             'free_list': free_list, 'total_mem': total_mem,
-            'strategy': strategy,
+            'strategy': strategy, 'occupied': occupied,
         }
 
         self._draw_seg_table(allocs, strategy)
@@ -1014,13 +1107,20 @@ class VirtualMemoryApp:
 
         tv.tag_configure('ok',  background='#14532d', foreground='white')
         tv.tag_configure('bad', background='#7f1d1d', foreground='white')
+        tv.tag_configure('pre', background='#334155', foreground='#cbd5e1')
 
         for a in allocs:
+            strat_cell = '—' if a['status'] == 'Pre-allocated' else strategy_label
             row = [a['name'], a['base'], a['size'], a['end'],
                    a['hole_size'] if a['hole_size'] is not None else '—',
-                   strategy_label, a['status']]
-            tv.insert('', tk.END, values=row,
-                      tags=('ok' if a['status'] == 'Allocated' else 'bad',))
+                   strat_cell, a['status']]
+            if a['status'] == 'Allocated':
+                tag = 'ok'
+            elif a['status'] == 'Pre-allocated':
+                tag = 'pre'
+            else:
+                tag = 'bad'
+            tv.insert('', tk.END, values=row, tags=(tag,))
 
     def _update_seg_stats(self, stats):
         self._seg_used_box._value_label.config(
@@ -1047,8 +1147,14 @@ class VirtualMemoryApp:
     def _draw_seg_diagram(self, allocs, total_mem, compacted=False):
         """Draw the horizontal memory bar.
 
-        If compacted=True, draw all allocated segments contiguously
-        starting at address 0, with free space at the end.
+        FIXED: Each block is drawn at its TRUE base address (a['base']) and
+        free holes are filled in between. The previous version stacked
+        blocks left-to-right with a cursor counter, which made all three
+        fit strategies look identical even when they weren't.
+
+        If compacted=True, every occupied block (including pre-allocated)
+        is repositioned contiguously starting at address 0, with the
+        merged free hole at the end.
         """
         ax = self._seg_ax
         ax.clear()
@@ -1058,58 +1164,72 @@ class VirtualMemoryApp:
         ax.set_ylim(0, 1)
         ax.axis('off')
 
-        if compacted:
-            # Re-position allocated segments contiguously
-            cursor = 0
-            allocated = [a for a in allocs if a['status'] == 'Allocated']
-            for ci, a in enumerate(allocated):
-                colour = SEG_COLOURS[ci % len(SEG_COLOURS)]
-                rect = mpatches.FancyBboxPatch(
-                    (cursor, 0.1), a['size'], 0.8,
-                    boxstyle='square,pad=0', color=colour)
-                ax.add_patch(rect)
-                if a['size'] > total_mem * 0.06:
-                    ax.text(cursor + a['size']/2, 0.5,
-                            f'{a["name"]}\n{a["size"]}KB',
-                            ha='center', va='center',
-                            color='white', fontsize=7, fontweight='bold')
-                cursor += a['size']
-            if cursor < total_mem:
-                rect = mpatches.FancyBboxPatch(
-                    (cursor, 0.1), total_mem - cursor, 0.8,
-                    boxstyle='square,pad=0', color='#30363d')
-                ax.add_patch(rect)
-                ax.text(cursor + (total_mem - cursor)/2, 0.5,
-                        f'FREE\n{total_mem - cursor} KB',
+        PRE_COLOUR  = '#475569'
+        FREE_COLOUR = '#30363d'
+
+        def draw_rect(start, size, colour, label=None):
+            rect = mpatches.FancyBboxPatch(
+                (start, 0.1), size, 0.8,
+                boxstyle='square,pad=0', color=colour)
+            ax.add_patch(rect)
+            if label and size > total_mem * 0.06:
+                ax.text(start + size/2, 0.5, label,
+                        ha='center', va='center',
+                        color='white', fontsize=7, fontweight='bold')
+
+        def draw_free(start, size):
+            rect = mpatches.FancyBboxPatch(
+                (start, 0.1), size, 0.8,
+                boxstyle='square,pad=0', color=FREE_COLOUR)
+            ax.add_patch(rect)
+            if size > total_mem * 0.06:
+                ax.text(start + size/2, 0.5, f'FREE\n{size} KB',
                         ha='center', va='center',
                         color=TXT_SEC, fontsize=7, style='italic')
-        else:
+
+        # Only blocks with a numeric base sit in the address space
+        placed = [a for a in allocs
+                  if a['status'] in ('Allocated', 'Pre-allocated')
+                  and isinstance(a['base'], int)]
+
+        if compacted:
+            # Pack every occupied block contiguously from 0 (preserving
+            # current address order) — show merged hole at the end.
+            placed.sort(key=lambda x: x['base'])
             cursor = 0
             ci = 0
-            for a in allocs:
-                if a['status'] == 'Allocated':
-                    colour = SEG_COLOURS[ci % len(SEG_COLOURS)]
-                    rect = mpatches.FancyBboxPatch(
-                        (cursor, 0.1), a['size'], 0.8,
-                        boxstyle='square,pad=0', color=colour)
-                    ax.add_patch(rect)
-                    if a['size'] > total_mem * 0.06:
-                        ax.text(cursor + a['size']/2, 0.5,
-                                f'{a["name"]}\n{a["size"]}KB',
-                                ha='center', va='center',
-                                color='white', fontsize=7, fontweight='bold')
-                    cursor += a['size']
+            for a in placed:
+                if a['status'] == 'Pre-allocated':
+                    draw_rect(cursor, a['size'], PRE_COLOUR,
+                              f'{a["name"]}\n{a["size"]}KB')
+                else:
+                    draw_rect(cursor, a['size'],
+                              SEG_COLOURS[ci % len(SEG_COLOURS)],
+                              f'{a["name"]}\n{a["size"]}KB')
                     ci += 1
-
+                cursor += a['size']
             if cursor < total_mem:
-                rect = mpatches.FancyBboxPatch(
-                    (cursor, 0.1), total_mem - cursor, 0.8,
-                    boxstyle='square,pad=0', color='#30363d')
-                ax.add_patch(rect)
-                ax.text(cursor + (total_mem - cursor)/2, 0.5,
-                        f'FREE\n{total_mem - cursor} KB',
-                        ha='center', va='center',
-                        color=TXT_SEC, fontsize=7, style='italic')
+                draw_free(cursor, total_mem - cursor)
+        else:
+            # Walk address space in order, drawing each block at its TRUE
+            # base and filling gaps with FREE blocks.
+            placed.sort(key=lambda x: x['base'])
+            cursor = 0
+            ci = 0
+            for a in placed:
+                if a['base'] > cursor:
+                    draw_free(cursor, a['base'] - cursor)
+                if a['status'] == 'Pre-allocated':
+                    draw_rect(a['base'], a['size'], PRE_COLOUR,
+                              f'{a["name"]}\n{a["size"]}KB')
+                else:
+                    draw_rect(a['base'], a['size'],
+                              SEG_COLOURS[ci % len(SEG_COLOURS)],
+                              f'{a["name"]}\n{a["size"]}KB')
+                    ci += 1
+                cursor = a['end']
+            if cursor < total_mem:
+                draw_free(cursor, total_mem - cursor)
 
         ax.text(0, -0.1, '0', ha='center', va='top',
                 color=TXT_SEC, fontsize=7, transform=ax.transData)
@@ -1129,8 +1249,10 @@ class VirtualMemoryApp:
         total_mem = r['total_mem']
         free_list = r['free_list']
 
-        allocated  = [a for a in allocs if a['status'] == 'Allocated']
-        used_mem   = sum(a['size'] for a in allocated)
+        # Both allocated and pre-allocated count as in-use
+        occupied   = [a for a in allocs
+                      if a['status'] in ('Allocated', 'Pre-allocated')]
+        used_mem   = sum(a['size'] for a in occupied)
         free_total = total_mem - used_mem
 
         largest_before = max((h['size'] for h in free_list), default=0)
