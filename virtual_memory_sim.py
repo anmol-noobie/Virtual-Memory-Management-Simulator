@@ -1,42 +1,40 @@
 """
 Virtual Memory Management Simulator
 A Tkinter-based GUI application for visualizing and simulating
-virtual memory management techniques.
+virtual memory management techniques including paging, segmentation,
+and page replacement algorithm comparison.
+
+New in this version:
+  - Segmentation: First Fit / Best Fit / Worst Fit allocation strategies
+  - Segmentation: Compact Memory button with before/after visualisation
+  - Segmentation: Per-segment delete button in the segment list
+  - Segmentation: Hole-size column in allocation results table
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-import time
 from collections import OrderedDict
+import math
+
 import matplotlib
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from matplotlib.patches import Rectangle
-from matplotlib.patches import Rectangle
-import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
 
 
 def simulate_lru(pages, num_frames):
-    """
-    Simulate LRU page replacement algorithm.
-    
-    Args:
-        pages: List of page numbers (integers)
-        num_frames: Number of memory frames
-        
-    Returns:
-        tuple: (frame_snapshots, fault_flags, total_faults)
-            - frame_snapshots: list of lists showing frame contents at each step
-            - fault_flags: list of booleans (True = page fault, False = hit)
-            - total_faults: total count of page faults
+    """LRU page replacement.
+
+    Returns (frame_snapshots, fault_flags, total_faults).
     """
     frames = []
     frame_snapshots = []
     fault_flags = []
     total_faults = 0
     recent_use = OrderedDict()
-    
+
     for page in pages:
         if page in frames:
             fault_flags.append(False)
@@ -44,7 +42,6 @@ def simulate_lru(pages, num_frames):
         else:
             total_faults += 1
             fault_flags.append(True)
-            
             if len(frames) < num_frames:
                 frames.append(page)
             else:
@@ -52,2006 +49,1468 @@ def simulate_lru(pages, num_frames):
                 idx = frames.index(lru_page)
                 frames[idx] = page
                 del recent_use[lru_page]
-            
             recent_use[page] = True
-        
         frame_snapshots.append(frames.copy())
-    
+
     return frame_snapshots, fault_flags, total_faults
 
 
 def simulate_optimal(pages, num_frames):
-    """
-    Simulate Optimal page replacement algorithm.
-    
-    Args:
-        pages: List of page numbers (integers)
-        num_frames: Number of memory frames
-        
-    Returns:
-        tuple: (frame_snapshots, fault_flags, total_faults)
-            - frame_snapshots: list of lists showing frame contents at each step
-            - fault_flags: list of booleans (True = page fault, False = hit)
-            - total_faults: total count of page faults
+    """Optimal page replacement.
+
+    Returns (frame_snapshots, fault_flags, total_faults).
     """
     frames = []
     frame_snapshots = []
     fault_flags = []
     total_faults = 0
-    
+
     for i, page in enumerate(pages):
         if page in frames:
             fault_flags.append(False)
         else:
             total_faults += 1
             fault_flags.append(True)
-            
             if len(frames) < num_frames:
                 frames.append(page)
             else:
-                future_refs = pages[i + 1:]
+                future = pages[i + 1:]
                 replace_idx = 0
-                max_distance = -1
-                
-                for j, frame_page in enumerate(frames):
+                max_dist = -1
+                for j, fp in enumerate(frames):
                     try:
-                        distance = future_refs.index(frame_page)
+                        dist = future.index(fp)
                     except ValueError:
-                        distance = len(future_refs) + 1
-                    
-                    if distance > max_distance:
-                        max_distance = distance
+                        dist = len(future) + 1
+                    if dist > max_dist:
+                        max_dist = dist
                         replace_idx = j
-                
                 frames[replace_idx] = page
-        
         frame_snapshots.append(frames.copy())
-    
+
     return frame_snapshots, fault_flags, total_faults
 
 
-ALGORITHMS = {
-    "LRU": simulate_lru,
-    "Optimal": simulate_optimal
-}
+def simulate_segmentation(segments, total_memory=512, strategy='first'):
+    """Segmentation with pluggable allocation strategy.
 
-
-def simulate_segmentation(segments, total_memory=512):
-    """
-    Simulate segmentation memory allocation.
-    
     Args:
-        segments: List of (name, size) tuples where size is in KB
-        total_memory: Total memory size in KB (default 512 KB)
-        
+        segments   : list of {'name': str, 'size': int}
+        total_memory: int  – total KB
+        strategy   : 'first' | 'best' | 'worst'
+
     Returns:
-        tuple: (allocations, stats)
-            - allocations: list of dicts with segment info and allocation status
-            - stats: dict with used_memory, free_memory, external_fragmentation
+        (allocations, stats, free_list_after)
+
+        allocations : list of dicts
+            { name, size, base, end, hole_size, status }
+        stats : dict
+            { total_memory, used_memory, free_memory,
+              external_fragmentation, largest_free_before }
+        free_list_after : list of {start, size}
     """
+    # Free list represented as [{start, size}, ...]
+    free_list = [{'start': 0, 'size': total_memory}]
     allocations = []
-    current_address = 0
-    
-    for name, size in segments:
-        if current_address + size <= total_memory:
-            allocation = {
-                'name': name,
-                'size': size,
-                'base_address': current_address,
-                'end_address': current_address + size,
-                'status': 'Allocated'
-            }
-            current_address += size
+
+    for seg in segments:
+        candidates = [
+            {**h, 'idx': i}
+            for i, h in enumerate(free_list)
+            if h['size'] >= seg['size']
+        ]
+
+        if not candidates:
+            allocations.append({
+                'name': seg['name'],
+                'size': seg['size'],
+                'base': '-',
+                'end': '-',
+                'hole_size': None,
+                'status': 'Failed',
+            })
+            continue
+
+        if strategy == 'first':
+            chosen = min(candidates, key=lambda h: h['start'])
+        elif strategy == 'best':
+            chosen = min(candidates, key=lambda h: h['size'])
+        else:  # worst
+            chosen = max(candidates, key=lambda h: h['size'])
+
+        base = chosen['start']
+        allocations.append({
+            'name': seg['name'],
+            'size': seg['size'],
+            'base': base,
+            'end': base + seg['size'],
+            'hole_size': chosen['size'],
+            'status': 'Allocated',
+        })
+
+        # Split chosen hole
+        remaining = chosen['size'] - seg['size']
+        idx = chosen['idx']
+        if remaining > 0:
+            free_list[idx] = {'start': chosen['start'] + seg['size'], 'size': remaining}
         else:
-            allocation = {
-                'name': name,
-                'size': size,
-                'base_address': '-',
-                'end_address': '-',
-                'status': 'Allocation Failed'
-            }
-        allocations.append(allocation)
-    
-    used_memory = sum(a['size'] for a in allocations if a['status'] == 'Allocated')
-    free_memory = total_memory - used_memory
-    external_fragmentation = free_memory
-    
+            free_list.pop(idx)
+
+    used = sum(a['size'] for a in allocations if a['status'] == 'Allocated')
+    free = total_memory - used
+    largest_before = max((h['size'] for h in free_list), default=0)
+
     stats = {
         'total_memory': total_memory,
-        'used_memory': used_memory,
-        'free_memory': free_memory,
-        'external_fragmentation': external_fragmentation
+        'used_memory': used,
+        'free_memory': free,
+        'external_fragmentation': free,
+        'largest_free_before': largest_before,
     }
-    
-    return allocations, stats
+    return allocations, stats, free_list
 
 
-def parse_page_reference(page_str):
-    """Parse page reference string into list of integers."""
+def parse_page_reference(text):
+    """Parse space/comma-separated page reference string."""
     try:
-        pages = [int(p.strip()) for p in page_str.replace(',', ' ').split() if p.strip()]
-        return pages
+        return [int(x.strip()) for x in text.replace(',', ' ').split() if x.strip()]
     except ValueError:
         return None
 
 
-class AnimatedButton(tk.Canvas):
-    """Animated button with smooth hover and click effects."""
+# ─────────────────────────────────────────────────────────────────
+#  COLOUR PALETTE
+# ─────────────────────────────────────────────────────────────────
+BG_DARK   = '#0f172a'
+BG_CARD   = '#1e293b'
+BG_INPUT  = '#1f2937'
+BG_ROW2   = '#111827'
+COL_BLUE  = '#3b82f6'
+COL_GREEN = '#22c55e'
+COL_RED   = '#ef4444'
+COL_AMBE  = '#f59e0b'
+COL_GRAY  = '#64748b'
+TXT_PRI   = '#f1f5f9'
+TXT_SEC   = '#94a3b8'
+BDR       = '#334155'
 
-    def __init__(self, parent, text="", command=None, width=200, height=48, **kwargs):
-        super().__init__(parent, width=width, height=height)
-        self.command = command
-        self._text = text
-        self.base_bg = "#1a6bff"
-        self.hover_bg = "#3388ff"
-        self.active_bg = "#0055dd"
-        self.text_color = "white"
-        self.corner_radius = 10
-        self.current_bg = self.base_bg
-        self.hovered = False
-        self.clicked = False
-
-        self.configure(highlightthickness=0, bg="#0f172a", cursor="hand2")
-        self._text_id = None
-        self._draw_button()
-
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<ButtonRelease-1>", self._on_release)
-
-        self.bind("<Configure>", lambda e: self._draw_button())
-
-    def _draw_button(self):
-        """Draw the rounded rectangle and text."""
-        self.delete("all")
-        w = max(self.winfo_width(), 200)
-        h = max(self.winfo_height(), 48)
-        self.create_rounded_rect(2, 2, w - 2, h - 2, self.corner_radius, fill=self.current_bg, outline="")
-        self._text_id = self.create_text(w // 2, h // 2, text=self._text, fill=self.text_color, font=("Segoe UI", 12, "bold"))
-
-    def create_rounded_rect(self, x1, y1, x2, y2, radius, **kwargs):
-        points = []
-        r = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
-        points = [x1 + r, y1, x2 - r, y1, x2, y1 + r, x2, y2 - r, x2 - r, y2, x1 + r, y2, x1, y2 - r, x1, y1 + r]
-        return self.create_polygon(points, smooth=True, joinstyle=tk.ROUND, **kwargs)
-
-    def _on_enter(self, event):
-        self.hovered = True
-        self.current_bg = self.hover_bg
-        self._draw_button()
-
-    def _on_leave(self, event):
-        self.hovered = False
-        self.current_bg = self.base_bg
-        self._draw_button()
-
-    def _on_click(self, event):
-        self.clicked = True
-        self.current_bg = self.active_bg
-        self._draw_button()
-
-    def _on_release(self, event):
-        self.clicked = False
-        if self.hovered:
-            self.current_bg = self.hover_bg
-        else:
-            self.current_bg = self.base_bg
-        self._draw_button()
-        if self.command:
-            self.command()
+SEG_COLOURS = ['#2563eb', '#7c3aed', '#059669', '#d97706',
+               '#dc2626', '#0891b2', '#db2777', '#16a34a']
 
 
-class ModernEntry(tk.Frame):
-    """Modern styled entry with animated focus border and placeholder text."""
+# ─────────────────────────────────────────────────────────────────
+#  HELPER WIDGETS
+# ─────────────────────────────────────────────────────────────────
 
-    def __init__(self, parent, placeholder="", width=40, **kwargs):
-        super().__init__(parent, **kwargs)
-        self.placeholder = placeholder
-        self.placeholder_color = "#6e7681"
-        self.text_color = "#ffffff"
-        self.border_color = "#374151"
-        self.focus_color = "#1a6bff"
-        self.current_border_color = self.border_color
-        self._has_focus = False
-        self._has_value = False
-
-        self.configure(bg="#1f2937", highlightthickness=2, highlightcolor=self.border_color, highlightbackground=self.border_color)
-
-        self.entry = tk.Entry(
-            self,
-            font=("Segoe UI", 11),
-            bg="#1f2937",
-            fg=self.placeholder_color,
-            insertbackground=self.text_color,
-            relief=tk.FLAT,
-            bd=0,
-            width=width
-        )
-        self.entry.pack(fill="x", padx=12, pady=10)
-        self.entry.insert(0, self.placeholder)
-
-        self.entry.bind("<FocusIn>", self._on_focus_in)
-        self.entry.bind("<FocusOut>", self._on_focus_out)
-        self.entry.bind("<Key>", self._on_key)
-
-        self.after(100, self._update_border)
-
-    def _update_border(self):
-        """Update the border color."""
-        self.configure(highlightbackground=self.current_border_color, highlightcolor=self.current_border_color)
-
-    def _on_focus_in(self, event):
-        self._has_focus = True
-        self.current_border_color = self.focus_color
-        self._update_border()
-        if not self._has_value:
-            self.entry.delete(0, tk.END)
-            self.entry.configure(fg=self.text_color)
-
-    def _on_focus_out(self, event):
-        self._has_focus = False
-        self.current_border_color = self.border_color
-        self._update_border()
-        value = self.entry.get()
-        if value == "":
-            self.entry.insert(0, self.placeholder)
-            self.entry.configure(fg=self.placeholder_color)
-            self._has_value = False
-        else:
-            self._has_value = True
-
-    def _on_key(self, event):
-        value = self.entry.get()
-        if not self._has_value and not self._has_focus:
-            self.entry.delete(0, tk.END)
-            self.entry.configure(fg=self.text_color)
-        if value and value != self.placeholder:
-            self._has_value = True
-        elif value == "":
-            self._has_value = False
-
-    def get(self):
-        value = self.entry.get()
-        return value if value != self.placeholder else ""
-
-    def insert(self, index, text):
-        self.entry.delete(0, tk.END)
-        self.entry.insert(0, text)
-        self.entry.configure(fg=self.text_color)
-        self._has_value = True
+class Card(tk.Frame):
+    def __init__(self, parent, **kw):
+        super().__init__(parent, bg=BG_CARD, **kw)
 
 
-class ModernDropdown(tk.Frame):
-    """Modern styled dropdown/combobox."""
-
-    def __init__(self, parent, values=None, width=40, **kwargs):
-        super().__init__(parent, **kwargs)
-        self.values = values or ["Option 1", "Option 2"]
-        self.selected_value = tk.StringVar(value=self.values[0])
-
-        self.configure(bg="#1f2937", highlightthickness=2, highlightbackground="#374151", highlightcolor="#374151")
-
-        self.dropdown = ttk.Combobox(
-            self,
-            textvariable=self.selected_value,
-            values=self.values,
-            state="readonly",
-            width=width - 2,
-            font=("Inter", 11)
-        )
-        self.dropdown.pack(fill="x", padx=12, pady=10)
-
-        self._style_dropdown()
-
-    def _style_dropdown(self):
-        """Style the ttk combobox."""
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure("Modern.TCombobox",
-                       fieldbackground="#1f2937",
-                       background="#1f2937",
-                       foreground="#ffffff",
-                       borderwidth=0,
-                       padding=0,
-                       arrowsize=14)
-        style.configure("Modern.Treeview",
-                       background="#1f2937",
-                       fieldbackground="#1f2937",
-                       foreground="#ffffff")
-        style.map("Modern.TCombobox",
-                 fieldbackground=[("readonly", "#1f2937")],
-                 foreground=[("readonly", "#ffffff")])
-        self.dropdown.configure(style="Modern.TCombobox")
-        self.dropdown.current(0)
-
-    def get(self):
-        return self.selected_value.get()
+class Label(tk.Label):
+    def __init__(self, parent, text='', size=11, bold=False,
+                 colour=TXT_PRI, bg=BG_CARD, **kw):
+        font = ('Inter', size, 'bold' if bold else 'normal')
+        super().__init__(parent, text=text, font=font,
+                         bg=bg, fg=colour, **kw)
 
 
-class ModernCard(tk.Frame):
-    """Modern card widget with subtle shadow effect."""
+def styled_entry(parent, placeholder='', width=34):
+    """Return a tk.Entry pre-styled for the dark theme."""
+    wrapper = tk.Frame(parent, bg=BG_INPUT,
+                       highlightthickness=1,
+                       highlightbackground=BDR)
+    e = tk.Entry(wrapper, font=('Segoe UI', 10),
+                 bg=BG_INPUT, fg=COL_GRAY,
+                 insertbackground=TXT_PRI,
+                 relief=tk.FLAT, bd=0, width=width)
+    e.pack(fill='x', padx=10, pady=6)
+    e.insert(0, placeholder)
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
-        self.configure(
-            bg="#1f2937",
-            highlightthickness=0
-        )
+    def _focus_in(ev):
+        if e.get() == placeholder:
+            e.delete(0, tk.END)
+            e.config(fg=TXT_PRI)
 
+    def _focus_out(ev):
+        if e.get() == '':
+            e.insert(0, placeholder)
+            e.config(fg=COL_GRAY)
+
+    e.bind('<FocusIn>',  _focus_in)
+    e.bind('<FocusOut>', _focus_out)
+    e._placeholder = placeholder
+    return wrapper, e
+
+
+def get_entry(entry_widget, placeholder):
+    v = entry_widget.get()
+    return '' if v == placeholder else v
+
+
+def styled_btn(parent, text, command, colour='#1a6bff',
+               hover='#3388ff', width=None, height=36):
+    """Simple flat tk.Button styled for the dark theme."""
+    kw = dict(text=text, command=command,
+              font=('Inter', 10, 'bold'),
+              bg=colour, fg='white',
+              activebackground=hover, activeforeground='white',
+              relief=tk.FLAT, bd=0, cursor='hand2',
+              pady=6)
+    if width:
+        kw['width'] = width
+    b = tk.Button(parent, **kw)
+    b.bind('<Enter>', lambda e: b.config(bg=hover))
+    b.bind('<Leave>', lambda e: b.config(bg=colour))
+    return b
+
+
+def styled_dropdown(parent, values, textvariable, width=30):
+    s = ttk.Style()
+    s.theme_use('clam')
+    s.configure('Dark.TCombobox',
+                fieldbackground=BG_INPUT, background=BG_INPUT,
+                foreground=TXT_PRI, selectbackground=BG_INPUT,
+                selectforeground=TXT_PRI, borderwidth=0, arrowsize=14)
+    s.map('Dark.TCombobox',
+          fieldbackground=[('readonly', BG_INPUT)],
+          foreground=[('readonly', TXT_PRI)])
+    cb = ttk.Combobox(parent, values=values,
+                      textvariable=textvariable,
+                      state='readonly', width=width,
+                      font=('Inter', 10),
+                      style='Dark.TCombobox')
+    cb.current(0)
+    return cb
+
+
+def style_treeview():
+    s = ttk.Style()
+    s.theme_use('clam')
+    s.configure('Dark.Treeview',
+                background='#1f2937', fieldbackground='#1f2937',
+                foreground='#e5e7eb', rowheight=26, borderwidth=0)
+    s.configure('Dark.Treeview.Heading',
+                background='#374151', fieldbackground='#374151',
+                foreground=TXT_PRI,
+                font=('Inter', 9, 'bold'), borderwidth=0)
+    s.map('Dark.Treeview', background=[('selected', COL_BLUE)])
+
+
+# ─────────────────────────────────────────────────────────────────
+#  MAIN APPLICATION
+# ─────────────────────────────────────────────────────────────────
 
 class VirtualMemoryApp:
-    """Main application class for the Virtual Memory Management Simulator."""
-
     def __init__(self, root):
         self.root = root
-        self.root.title("Virtual Memory Management Simulator")
-        self.root.geometry("1000x700")
-        self.root.minsize(900, 600)
-        self.root.configure(bg="#0f172a")
+        root.title('Virtual Memory Management Simulator')
+        root.geometry('1100x750')
+        root.minsize(900, 620)
+        root.configure(bg=BG_DARK)
 
-        self.bg_gradient = ["#0f172a", "#1e293b"]
-        self.accent_blue = "#3b82f6"
-        self.accent_purple = "#8b5cf6"
-        self.text_primary = "#f1f5f9"
-        self.text_secondary = "#94a3b8"
-        self.card_bg = "#1e293b"
-        self.card_border = "#334155"
+        self.segments = []           # list of {'name':str, 'size':int}
+        self.last_seg_result = None  # stores last segmentation run for Compact
 
-        self.last_action = "Application started"
-        
-        self._create_ui()
-        self._update_status_bar()
+        style_treeview()
+        self._build_ui()
 
-    def _create_ui(self):
-        """Create the main UI structure."""
-        self._create_header()
-        self._create_main_content()
+    # ── Top-level layout ──────────────────────────────────────────
 
-    def _create_header(self):
-        """Create a modern gradient header."""
-        header = tk.Frame(self.root, bg="#0f172a", height=80)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-
-        title_container = tk.Frame(header, bg="#0f172a")
-        title_container.pack(fill="both", expand=True, padx=30, pady=15)
-
-        title = tk.Label(
-            title_container,
-            text="Virtual Memory Simulator",
-            font=("Inter", 24, "bold"),
-            bg="#0f172a",
-            fg=self.text_primary
-        )
-        title.pack(side="left")
-
-        subtitle = tk.Label(
-            title_container,
-            text="Day 5: Added Segmentation & Fragmentation tab with memory allocation simulation and visualization",
-            font=("Inter", 12),
-            bg="#0f172a",
-            fg=self.text_secondary
-        )
-        subtitle.pack(side="left", padx=(15, 0), pady=(5, 0))
-
-        badge = tk.Label(
-            title_container,
-            text="v1.0",
-            font=("Inter", 9, "bold"),
-            bg="#3b82f6",
-            fg="white",
-            padx=8,
-            pady=2
-        )
-        badge.pack(side="left", padx=(15, 0), pady=(3, 0))
-
-    def _create_main_content(self):
-        """Create the main content area with tabs."""
-        main_frame = tk.Frame(self.root, bg="#0f172a")
-        main_frame.pack(fill="both", expand=True, padx=25, pady=(0, 25))
-
-        tab_buttons_frame = tk.Frame(main_frame, bg="#0f172a")
-        tab_buttons_frame.pack(fill="x", pady=(0, 20))
-
-        self.tab_buttons = []
-        self.active_tab = 0
-        tab_names = ["Paging & Demand Paging", "Segmentation & Fragmentation", "LRU vs Optimal Comparison"]
-        tab_icons = ["📄", "🧩", "⚡"]
-
-        for i, (name, icon) in enumerate(zip(tab_names, tab_icons)):
-            btn = self._create_tab_button(tab_buttons_frame, name, icon, i)
-            self.tab_buttons.append(btn)
-            btn["frame"].pack(side="left", padx=(0, 8))
-
-        self.content_frame = tk.Frame(main_frame, bg="#0f172a")
-        self.content_frame.pack(fill="both", expand=True)
-
-        self.tab_contents = []
-        self._create_paging_tab()
-        self._create_segmentation_tab()
-        self._create_comparison_tab()
-
+    def _build_ui(self):
+        self._build_header()
+        self._build_tabs()
+        self._build_status()
         self._show_tab(0)
-        self._create_status_bar()
 
-    def _create_status_bar(self):
-        """Create a status bar at the bottom of the window."""
-        self.status_bar = tk.Frame(self.root, bg="#1e293b", height=30)
-        self.status_bar.pack(fill="x", side="bottom")
-        
-        self.status_label = tk.Label(
-            self.status_bar,
-            text=self.last_action,
-            font=("Inter", 10),
-            bg="#1e293b",
-            fg=self.text_secondary,
-            anchor="w",
-            padx=15
-        )
-        self.status_label.pack(side="left", fill="x", expand=True)
+    def _build_header(self):
+        hdr = tk.Frame(self.root, bg='#0a0f1e', height=72)
+        hdr.pack(fill='x')
+        hdr.pack_propagate(False)
+        inner = tk.Frame(hdr, bg='#0a0f1e')
+        inner.pack(fill='both', expand=True, padx=28, pady=14)
+        tk.Label(inner, text='Virtual Memory Simulator',
+                 font=('Inter', 22, 'bold'),
+                 bg='#0a0f1e', fg=TXT_PRI).pack(side='left')
+        tk.Label(inner,
+                 text='Paging · Segmentation · Algorithm Comparison',
+                 font=('Inter', 11), bg='#0a0f1e', fg=TXT_SEC
+                 ).pack(side='left', padx=16, pady=4)
+        tk.Label(inner, text=' v2.0 ', font=('Inter', 9, 'bold'),
+                 bg=COL_BLUE, fg='white', padx=8, pady=2
+                 ).pack(side='left')
 
-    def _update_status_bar(self, message=None):
-        """Update the status bar with a new message."""
-        if message:
-            self.last_action = message
-        self.status_label.configure(text=self.last_action)
+    def _build_tabs(self):
+        self.active_tab = 0
+        tab_bar = tk.Frame(self.root, bg=BG_DARK)
+        tab_bar.pack(fill='x', padx=24, pady=(10, 0))
 
-    def _create_tab_button(self, parent, text, icon, index):
-        """Create a modern tab button with hover effects."""
-        btn_frame = tk.Frame(parent, bg="#1e293b", cursor="hand2")
+        names = ['📄 Paging & Demand Paging',
+                 '🧩 Segmentation & Fragmentation',
+                 '⚡ LRU vs Optimal Comparison']
+        self._tab_btns = []
+        for i, n in enumerate(names):
+            b = tk.Label(tab_bar, text=n,
+                         font=('Inter', 11),
+                         bg=BG_DARK, fg=TXT_SEC,
+                         padx=20, pady=10, cursor='hand2')
+            b.pack(side='left', padx=(0, 6))
+            b.bind('<Button-1>', lambda e, i=i: self._show_tab(i))
+            self._tab_btns.append(b)
 
-        label = tk.Label(
-            btn_frame,
-            text=f"{icon}  {text}",
-            font=("Inter", 12),
-            bg="#1e293b",
-            fg=self.text_secondary,
-            padx=20,
-            pady=12
-        )
-        label.pack(fill="both")
-        label.bind("<Button-1>", lambda e, i=index: self._on_tab_click(i))
-        btn_frame.bind("<Button-1>", lambda e, i=index: self._on_tab_click(i))
+        sep = tk.Frame(self.root, bg=BDR, height=1)
+        sep.pack(fill='x', padx=0)
 
-        def on_enter(e):
-            if self.active_tab != index:
-                btn_frame.configure(bg="#334155")
-                label.configure(bg="#334155", fg=self.text_primary)
+        self.tab_frame = tk.Frame(self.root, bg=BG_DARK)
+        self.tab_frame.pack(fill='both', expand=True, padx=20, pady=16)
 
-        def on_leave(e):
-            if self.active_tab != index:
-                btn_frame.configure(bg="#1e293b")
-                label.configure(bg="#1e293b", fg=self.text_secondary)
+        self._pages = []
+        self._pages.append(self._build_paging_page())
+        self._pages.append(self._build_segmentation_page())
+        self._pages.append(self._build_comparison_page())
 
-        btn_frame.bind("<Enter>", on_enter)
-        btn_frame.bind("<Leave>", on_leave)
-        label.bind("<Enter>", on_enter)
-        label.bind("<Leave>", on_leave)
-
-        return {"frame": btn_frame, "label": label, "index": index}
-
-    def _on_tab_click(self, index):
-        """Handle tab click."""
-        self._show_tab(index)
-
-    def _show_tab(self, index):
-        """Show the selected tab."""
-        btn = self.tab_buttons[self.active_tab]
-        btn["frame"].configure(bg="#1e293b")
-        btn["label"].configure(bg="#1e293b", fg=self.text_secondary)
-
-        self.active_tab = index
-        btn = self.tab_buttons[index]
-        btn["frame"].configure(bg="#3b82f6")
-        btn["label"].configure(bg="#3b82f6", fg="white")
-
-        for i, content in enumerate(self.tab_contents):
-            if i == index:
-                content.pack(fill="both", expand=True)
+    def _show_tab(self, idx):
+        for i, b in enumerate(self._tab_btns):
+            if i == idx:
+                b.config(bg=COL_BLUE, fg='white')
             else:
-                content.pack_forget()
-
-    def _create_paging_tab(self):
-        """Create the Paging tab content."""
-        content = tk.Frame(self.content_frame, bg="#0f172a")
-        self.tab_contents.append(content)
-
-        content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure(0, weight=0)
-        content.grid_columnconfigure(1, weight=1)
-
-        left_panel = tk.Frame(content, bg="#0f172a")
-        left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 20))
-
-        self._create_input_card(left_panel)
-        self._create_run_button(left_panel)
-
-        right_panel = tk.Frame(content, bg="#0f172a")
-        right_panel.grid(row=0, column=1, sticky="nsew")
-
-        scroll_canvas = tk.Canvas(right_panel, bg="#0f172a", highlightthickness=0, width=600)
-        scroll_canvas.grid(row=0, column=0, sticky="nsew")
-
-        scrollbar = tk.Scrollbar(right_panel, orient="vertical", command=scroll_canvas.yview)
-        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        scroll_canvas.configure(yscrollcommand=scrollbar.set)
-
-        right_panel.grid_rowconfigure(0, weight=1)
-        right_panel.grid_columnconfigure(0, weight=1)
-
-        vis_container = tk.Frame(scroll_canvas, bg="#0f172a")
-        vis_container_id = scroll_canvas.create_window((0, 0), window=vis_container, anchor="nw")
-
-        def on_configure(event):
-            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
-            scroll_canvas.itemconfig(vis_container_id, width=scroll_canvas.winfo_width())
-
-        scroll_canvas.bind('<Configure>', on_configure)
-        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
-
-        self.vis_container = vis_container
-        self.scroll_canvas = scroll_canvas
-        self._create_output_area(vis_container)
-        self._create_fault_graph(vis_container)
-
-    def _create_input_card(self, parent):
-        """Create input form card."""
-        card = ModernCard(parent)
-        card.pack(fill="x", pady=(0, 15))
-
-        card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=20, pady=(15, 10))
-
-        tk.Label(
-            card_header,
-            text="Configuration",
-            font=("Inter", 14, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        tk.Label(
-            card_header,
-            text="●",
-            font=("Inter", 10),
-            bg="#1e293b",
-            fg="#22c55e"
-        ).pack(side="right")
-
-        input_container = tk.Frame(card, bg="#1e293b")
-        input_container.pack(fill="x", padx=20, pady=(0, 15))
-
-        tk.Label(
-            input_container,
-            text="Page Reference String",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=0, column=0, sticky="w", pady=(10, 5))
-
-        self.page_ref_entry = ModernEntry(input_container, placeholder="e.g. 7 0 1 2 0 3 0 4 2 3", width=45)
-        self.page_ref_entry.grid(row=1, column=0, sticky="ew", pady=(0, 15), columnspan=2)
-
-        tk.Label(
-            input_container,
-            text="Number of Frames",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=2, column=0, sticky="w", pady=(0, 5))
-
-        self.frames_entry = ModernEntry(input_container, placeholder="e.g. 3", width=45)
-        self.frames_entry.grid(row=3, column=0, sticky="ew", pady=(0, 15), columnspan=2)
-
-        tk.Label(
-            input_container,
-            text="Algorithm",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=4, column=0, sticky="w", pady=(0, 5))
-
-        self.algorithm_dropdown = ModernDropdown(input_container, values=["LRU", "Optimal"], width=45)
-        self.algorithm_dropdown.grid(row=5, column=0, sticky="ew", pady=(0, 10), columnspan=2)
-
-        info_label = tk.Label(
-            input_container,
-            text="LRU: Replaces least recently used page\nOptimal: Replaces page used farthest in future",
-            font=("Inter", 8),
-            bg="#1e293b",
-            fg="#64748b",
-            justify="left"
-        )
-        info_label.grid(row=6, column=0, sticky="w", columnspan=2)
-
-        input_container.columnconfigure(0, weight=1)
-
-    def _create_run_button(self, parent):
-        """Create the run simulation button."""
-        btn_frame = tk.Frame(parent, bg="#0f172a")
-        btn_frame.pack(fill="x", pady=(5, 0))
-
-        self.run_button = AnimatedButton(
-            btn_frame,
-            text="▶  Run Simulation",
-            command=self._on_run_clicked,
-            width=200,
-            height=48
-        )
-        self.run_button.pack(side="left")
-
-        tk.Label(
-            btn_frame,
-            text="or press Enter",
-            font=("Inter", 9),
-            bg="#0f172a",
-            fg=self.text_secondary
-        ).pack(side="left", padx=(12, 0), pady=(0, 0))
-
-        reset_btn = tk.Frame(parent, bg="#0f172a")
-        reset_btn.pack(fill="x", pady=(10, 0))
-        
-        self.reset_button = AnimatedButton(
-            reset_btn,
-            text="↺  Reset / Clear",
-            command=self._on_reset_paging,
-            width=200,
-            height=40
-        )
-        self.reset_button.pack(side="left")
-
-        self.root.bind("<Return>", lambda e: self._on_run_clicked())
-
-    def _create_output_area(self, parent):
-        """Create the output visualization area with table."""
-        parent.grid_rowconfigure(0, weight=0)
-        parent.grid_rowconfigure(1, weight=1)
-        parent.grid_columnconfigure(0, weight=1)
-
-        table_section = ModernCard(parent)
-        table_section.grid(row=0, column=0, sticky="ew", pady=(0, 15))
-
-        card_header = tk.Frame(table_section, bg="#1e293b")
-        card_header.pack(fill="x", padx=20, pady=(15, 10))
-
-        tk.Label(
-            card_header,
-            text="Results Table",
-            font=("Inter", 14, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        stats_frame = tk.Frame(card_header, bg="#1e293b")
-        stats_frame.pack(side="right")
-
-        self.page_faults_label = tk.Label(
-            stats_frame,
-            text="Faults: --",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg="#ef4444",
-            padx=8
-        )
-        self.page_faults_label.pack(side="left", padx=(0, 8))
-
-        self.hit_ratio_label = tk.Label(
-            stats_frame,
-            text="Hit: --",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg="#22c55e"
-        )
-        self.hit_ratio_label.pack(side="left")
-
-        table_container = tk.Frame(table_section, bg="#1e293b")
-        table_container.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-        self.table_placeholder = tk.Label(
-            table_container,
-            text="Run a simulation to see results",
-            font=("Inter", 12),
-            bg="#1e293b",
-            fg="#64748b",
-            pady=40
-        )
-        self.table_placeholder.pack(fill="both", expand=True)
-
-        table_inner = tk.Frame(table_container, bg="#1e293b")
-        table_inner.pack(fill="both", expand=True)
-        table_inner.pack_forget()
-
-        scrollbar_y = ttk.Scrollbar(table_inner, orient="vertical")
-        scrollbar_y.pack(side="right", fill="y")
-
-        scrollbar_x = ttk.Scrollbar(table_inner, orient="horizontal")
-        scrollbar_x.pack(side="bottom", fill="x")
-
-        self.result_tree = ttk.Treeview(table_inner, show="headings", style="Modern.Treeview",
-                                        yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-        scrollbar_y.configure(command=self.result_tree.yview)
-        scrollbar_x.configure(command=self.result_tree.xview)
-
-        self.result_tree.pack(side="left", fill="both", expand=True)
-
-        self.result_tree.tag_configure("fault", background="#7f1d1d", foreground="white")
-        self.result_tree.tag_configure("hit", background="#14532d", foreground="white")
-
-        self._style_treeview()
-
-        self.table_container = table_container
-        self.table_inner = table_inner
-
-        summary_container = tk.Frame(table_section, bg="#1e293b")
-        summary_container.pack(fill="x", padx=20, pady=(0, 15))
-
-        self.summary_label = tk.Label(
-            summary_container,
-            text="Total References: --  |  Total Faults: --  |  Hit Ratio: --",
-            font=("Inter", 11, "bold"),
-            bg="#1e293b",
-            fg=self.accent_blue,
-            padx=10,
-            pady=10
-        )
-        self.summary_label.pack(side="left")
-
-    def _style_treeview(self):
-        """Style the Treeview widget."""
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure("Modern.Treeview",
-                        background="#1f2937",
-                        fieldbackground="#1f2937",
-                        foreground="#e5e7eb",
-                        rowheight=28,
-                        borderwidth=0)
-        style.configure("Modern.Treeview.Heading",
-                        background="#374151",
-                        fieldbackground="#374151",
-                        foreground="#f1f5f9",
-                        font=("Inter", 10, "bold"),
-                        borderwidth=0)
-        style.map("Modern.Treeview", background=[("selected", "#3b82f6")])
-
-    def _create_segmentation_tab(self):
-        """Create the Segmentation tab content with scrollable canvas."""
-        content = tk.Frame(self.content_frame, bg="#0f172a")
-        self.tab_contents.append(content)
-
-        scroll_canvas = tk.Canvas(content, bg="#0f172a", highlightthickness=0)
-        scrollbar = tk.Scrollbar(content, orient="vertical", command=scroll_canvas.yview)
-        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
-        scroll_canvas.configure(yscrollcommand=scrollbar.set)
-
-        scrollbar.pack(side="right", fill="y")
-        scroll_canvas.pack(side="left", fill="both", expand=True)
-
-        inner_frame = tk.Frame(scroll_canvas, bg="#0f172a")
-        inner_window = scroll_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
-
-        def on_configure(event):
-            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
-            scroll_canvas.itemconfig(inner_window, width=scroll_canvas.winfo_width())
-
-        scroll_canvas.bind('<Configure>', on_configure)
-        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
-
-        content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure(0, weight=1)
-
-        inner_frame.grid_rowconfigure(0, weight=0)
-        inner_frame.grid_rowconfigure(1, weight=0)
-        inner_frame.grid_columnconfigure(0, weight=0, minsize=350)
-        inner_frame.grid_columnconfigure(1, weight=1)
-
-        left_panel = tk.Frame(inner_frame, bg="#0f172a")
-        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 20), pady=(0, 15))
-
-        self._create_segment_input_card(left_panel)
-
-        right_panel = tk.Frame(inner_frame, bg="#0f172a")
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 0), pady=(0, 15))
-
-        self._create_segment_results_card(right_panel)
-
-        bottom_panel = tk.Frame(inner_frame, bg="#0f172a")
-        bottom_panel.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(0, 0), pady=(0, 15))
-
-        self._create_segment_memory_diagram(bottom_panel)
-
-    def _create_segment_input_card(self, parent):
-        """Create input form card for segmentation."""
-        card = ModernCard(parent)
-        card.pack(fill="both", expand=True, pady=(0, 15))
-
-        card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=15, pady=(10, 5))
-
-        tk.Label(
-            card_header,
-            text="Add Segments",
-            font=("Inter", 12, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        tk.Label(
-            card_header,
-            text="●",
-            font=("Inter", 9),
-            bg="#1e293b",
-            fg="#22c55e"
-        ).pack(side="right")
-
-        input_container = tk.Frame(card, bg="#1e293b")
-        input_container.pack(fill="x", padx=15, pady=(0, 8))
-
-        tk.Label(
-            input_container,
-            text="Segment Name",
-            font=("Inter", 9, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=0, column=0, sticky="w", pady=(5, 2))
-
-        seg_name_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
-        seg_name_frame.grid(row=1, column=0, sticky="ew", pady=(0, 6), columnspan=2)
-        self.seg_name_entry = tk.Entry(seg_name_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
-                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
-        self.seg_name_entry.pack(fill="x", padx=10, pady=6)
-        self.seg_name_entry.insert(0, "e.g. Code, Data, Stack")
-        self.seg_name_entry.bind("<FocusIn>", lambda e, w=self.seg_name_entry, p="e.g. Code, Data, Stack": self._on_entry_focus_in(w, p))
-        self.seg_name_entry.bind("<FocusOut>", lambda e, w=self.seg_name_entry, p="e.g. Code, Data, Stack": self._on_entry_focus_out(w, p))
-
-        tk.Label(
-            input_container,
-            text="Segment Size (KB)",
-            font=("Inter", 9, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=2, column=0, sticky="w", pady=(0, 2))
-
-        seg_size_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
-        seg_size_frame.grid(row=3, column=0, sticky="ew", pady=(0, 6), columnspan=2)
-        self.seg_size_entry = tk.Entry(seg_size_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
-                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
-        self.seg_size_entry.pack(fill="x", padx=10, pady=6)
-        self.seg_size_entry.insert(0, "e.g. 100")
-        self.seg_size_entry.bind("<FocusIn>", lambda e, w=self.seg_size_entry, p="e.g. 100": self._on_entry_focus_in(w, p))
-        self.seg_size_entry.bind("<FocusOut>", lambda e, w=self.seg_size_entry, p="e.g. 100": self._on_entry_focus_out(w, p))
-
-        tk.Label(
-            input_container,
-            text="Total Memory (KB)",
-            font=("Inter", 9, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).grid(row=4, column=0, sticky="w", pady=(0, 2))
-
-        total_mem_frame = tk.Frame(input_container, bg="#1f2937", highlightthickness=1, highlightbackground="#374151")
-        total_mem_frame.grid(row=5, column=0, sticky="ew", pady=(0, 8), columnspan=2)
-        self.total_mem_entry = tk.Entry(total_mem_frame, font=("Segoe UI", 10), bg="#1f2937", fg="#6e7681",
-                                        insertbackground="white", relief=tk.FLAT, bd=0, width=35)
-        self.total_mem_entry.pack(fill="x", padx=10, pady=6)
-        self.total_mem_entry.insert(0, "e.g. 512")
-        self.total_mem_entry.bind("<FocusIn>", lambda e, w=self.total_mem_entry, p="e.g. 512": self._on_entry_focus_in(w, p))
-        self.total_mem_entry.bind("<FocusOut>", lambda e, w=self.total_mem_entry, p="e.g. 512": self._on_entry_focus_out(w, p))
-
-        input_container.columnconfigure(0, weight=1)
-
-        btn_container = tk.Frame(card, bg="#1e293b")
-        btn_container.pack(fill="x", padx=15, pady=(0, 8))
-
-        self.add_seg_button = AnimatedButton(
-            btn_container,
-            text="+ Add Segment",
-            command=self._on_add_segment,
-            width=140,
-            height=36
-        )
-        self.add_seg_button.pack(fill="x", expand=True)
-
-        self.run_seg_button = AnimatedButton(
-            btn_container,
-            text="Run Segmentation",
-            command=self._on_run_segmentation,
-            width=140,
-            height=36
-        )
-        self.run_seg_button.pack(fill="x", expand=True, pady=(5, 0))
-
-        self.clear_seg_button = AnimatedButton(
-            btn_container,
-            text="Clear All",
-            command=self._on_clear_segments,
-            width=140,
-            height=36
-        )
-        self.clear_seg_button.pack(fill="x", expand=True, pady=(5, 0))
-
-        list_card = tk.Frame(card, bg="#1e293b")
-        list_card.pack(fill="x", padx=15, pady=(0, 10))
-
-        list_header = tk.Frame(list_card, bg="#1f2937")
-        list_header.pack(fill="x", padx=10, pady=(8, 3))
-
-        tk.Label(
-            list_header,
-            text="Segments List",
-            font=("Inter", 10, "bold"),
-            bg="#1f2937",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        self.seg_count_label = tk.Label(
-            list_header,
-            text="0 segments",
-            font=("Inter", 9),
-            bg="#1f2937",
-            fg=self.text_secondary
-        )
-        self.seg_count_label.pack(side="right")
-
-        list_container = tk.Frame(list_card, bg="#1f2937")
-        list_container.pack(fill="x", padx=10, pady=(0, 8))
-
-        self.scrollbar_y = ttk.Scrollbar(list_container, orient="vertical")
-        self.scrollbar_y.pack(side="right", fill="y")
-
-        self.seg_listbox = tk.Listbox(
-            list_container,
-            font=("Inter", 10),
-            bg="#1f2937",
-            fg=self.text_primary,
-            highlightthickness=0,
-            bd=0,
-            selectbackground="#3b82f6",
-            selectforeground="white",
-            activestyle="none",
-            yscrollcommand=self.scrollbar_y.set,
-            height=5
-        )
-        self.scrollbar_y.configure(command=self.seg_listbox.yview)
-        self.seg_listbox.pack(side="left", fill="both", expand=True)
-        self.scrollbar_y.pack_forget()
-
-        info_label = tk.Label(
-            list_card,
-            text="External fragmentation: free memory that cannot\nbe used to satisfy a request due to being\nsplit into small non-contiguous blocks",
-            font=("Inter", 8),
-            bg="#1e293b",
-            fg="#64748b",
-            justify="left"
-        )
-        info_label.pack(fill="x", padx=10, pady=(0, 8))
-
-        self.segments = []
-
-    def _create_segment_results_card(self, parent):
-        """Create results card for segmentation."""
-        card = ModernCard(parent)
-        card.pack(fill="both", expand=True)
-
-        card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=20, pady=(15, 10))
-
-        tk.Label(
-            card_header,
-            text="Allocation Results",
-            font=("Inter", 14, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        self.seg_status_label = tk.Label(
-            card_header,
-            text="Add segments and run",
-            font=("Inter", 10),
-            bg="#1e293b",
-            fg=self.text_secondary
-        )
-        self.seg_status_label.pack(side="right")
-
-        stats_frame = tk.Frame(card, bg="#1e293b")
-        stats_frame.pack(fill="x", padx=20, pady=(0, 10))
-
-        self.seg_used_label = tk.Label(
-            stats_frame,
-            text="Used: -- KB",
-            font=("Inter", 11, "bold"),
-            bg="#1e293b",
-            fg="#22c55e",
-            padx=12,
-            pady=8
-        )
-        self.seg_used_label.pack(side="left", padx=(0, 8))
-
-        self.seg_free_label = tk.Label(
-            stats_frame,
-            text="Free: -- KB",
-            font=("Inter", 11, "bold"),
-            bg="#1e293b",
-            fg="#f59e0b",
-            padx=12,
-            pady=8
-        )
-        self.seg_free_label.pack(side="left", padx=(0, 8))
-
-        self.seg_frag_label = tk.Label(
-            stats_frame,
-            text="Fragmentation: -- KB",
-            font=("Inter", 11, "bold"),
-            bg="#1e293b",
-            fg="#ef4444",
-            padx=12,
-            pady=8
-        )
-        self.seg_frag_label.pack(side="left")
-
-        table_container = tk.Frame(card, bg="#1e293b")
-        table_container.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-        self.seg_table_placeholder = tk.Label(
-            table_container,
-            text="Run segmentation to see allocation results",
-            font=("Inter", 12),
-            bg="#1e293b",
-            fg="#64748b",
-            pady=40
-        )
-        self.seg_table_placeholder.pack(fill="both", expand=True)
-
-        seg_table_inner = tk.Frame(table_container, bg="#1e293b")
-        seg_table_inner.pack(fill="both", expand=True)
-        seg_table_inner.pack_forget()
-
-        scrollbar_y = ttk.Scrollbar(seg_table_inner, orient="vertical")
-        scrollbar_y.pack(side="right", fill="y")
-
-        scrollbar_x = ttk.Scrollbar(seg_table_inner, orient="horizontal")
-        scrollbar_x.pack(side="bottom", fill="x")
-
-        self.seg_result_tree = ttk.Treeview(seg_table_inner, show="headings", style="Modern.Treeview",
-                                            yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-        scrollbar_y.configure(command=self.seg_result_tree.yview)
-        scrollbar_x.configure(command=self.seg_result_tree.xview)
-
-        self.seg_result_tree.pack(side="left", fill="both", expand=True)
-
-        self.seg_result_tree.tag_configure("allocated", background="#14532d", foreground="white")
-        self.seg_result_tree.tag_configure("failed", background="#7f1d1d", foreground="white")
-
-        self.seg_table_container = table_container
-        self.seg_table_inner = seg_table_inner
-
-    def _create_segment_memory_diagram(self, parent):
-        """Create the memory diagram card with Matplotlib."""
-        card = ModernCard(parent)
-        card.pack(fill="both", expand=True)
-
-        card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=20, pady=(15, 10))
-
-        tk.Label(
-            card_header,
-            text="Memory Visualization",
-            font=("Inter", 12, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        self.seg_fig = Figure(figsize=(9, 3), dpi=100, facecolor='#161b22')
-        self.seg_ax = self.seg_fig.add_subplot(111)
-        self.seg_ax.set_facecolor('#161b22')
-
-        graph_inner = tk.Frame(card, bg='#161b22')
-        graph_inner.pack(fill="x", padx=15, pady=(0, 10))
-
-        self.seg_canvas = FigureCanvasTkAgg(self.seg_fig, master=graph_inner)
-        self.seg_canvas.get_tk_widget().configure(bg='#161b22')
-        self.seg_canvas.get_tk_widget().pack(fill="x")
-
-        self._update_segment_diagram([], 512)
-
-    def _on_entry_focus_in(self, widget, placeholder):
-        """Handle entry focus in - clear placeholder."""
-        if widget.get() == placeholder:
-            widget.delete(0, tk.END)
-            widget.configure(fg="#ffffff")
-
-    def _on_entry_focus_out(self, widget, placeholder):
-        """Handle entry focus out - restore placeholder."""
-        if widget.get() == "":
-            widget.insert(0, placeholder)
-            widget.configure(fg="#6e7681")
-
-    def _on_add_segment(self):
-        """Handle Add Segment button click."""
-        name = self.seg_name_entry.get().strip()
-        size_str = self.seg_size_entry.get().strip()
-
-        if not name or name == "e.g. Code, Data, Stack":
-            messagebox.showerror("Input Error", "Please enter a segment name.")
+                b.config(bg=BG_DARK, fg=TXT_SEC)
+        for i, p in enumerate(self._pages):
+            if i == idx:
+                p.pack(fill='both', expand=True)
+            else:
+                p.pack_forget()
+        self.active_tab = idx
+
+    def _build_status(self):
+        bar = tk.Frame(self.root, bg='#111827', height=28)
+        bar.pack(fill='x', side='bottom')
+        bar.pack_propagate(False)
+        self._status_var = tk.StringVar(value='Ready')
+        tk.Label(bar, textvariable=self._status_var,
+                 font=('Inter', 9), bg='#111827', fg=TXT_SEC,
+                 anchor='w', padx=16).pack(fill='x')
+
+    def _set_status(self, msg):
+        self._status_var.set(msg)
+        self.root.update_idletasks()
+
+    # ══════════════════════════════════════════════════════════════
+    #  TAB 1 — PAGING
+    # ══════════════════════════════════════════════════════════════
+
+    def _build_paging_page(self):
+        page = tk.Frame(self.tab_frame, bg=BG_DARK)
+
+        # Left panel – config
+        left = tk.Frame(page, bg=BG_DARK, width=280)
+        left.pack(side='left', fill='y', padx=(0, 14))
+        left.pack_propagate(False)
+        self._build_paging_config(left)
+
+        # Right panel – results + graph
+        right = tk.Frame(page, bg=BG_DARK)
+        right.pack(side='left', fill='both', expand=True)
+
+        # Results card
+        res_card = Card(right)
+        res_card.pack(fill='both', expand=True, pady=(0, 12))
+        Label(res_card, '  Results Table', size=12, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 4))
+
+        self._pg_tree_frame = tk.Frame(res_card, bg=BG_CARD)
+        self._pg_tree_frame.pack(fill='both', expand=True, padx=12, pady=(0, 10))
+        self._pg_placeholder = tk.Label(
+            self._pg_tree_frame,
+            text='Run a simulation to see results',
+            font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY, pady=40)
+        self._pg_placeholder.pack()
+
+        # Graph card
+        graph_card = Card(right)
+        graph_card.pack(fill='x', pady=(0, 4))
+        Label(graph_card, '  Page Fault Graph', size=12, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 4))
+        self._pg_graph_frame = tk.Frame(graph_card, bg=BG_CARD)
+        self._pg_graph_frame.pack(fill='x', padx=12, pady=(0, 10))
+        self._pg_fig = Figure(figsize=(6, 2.2), facecolor=BG_CARD)
+        self._pg_ax  = self._pg_fig.add_subplot(111)
+        self._pg_canvas = FigureCanvasTkAgg(self._pg_fig, self._pg_graph_frame)
+        self._pg_canvas.get_tk_widget().pack(fill='x')
+        self._pg_draw_empty_graph()
+
+        return page
+
+    def _build_paging_config(self, parent):
+        card = Card(parent)
+        card.pack(fill='x', pady=(0, 12))
+
+        Label(card, '  Configuration', size=12, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 6))
+
+        f = tk.Frame(card, bg=BG_CARD)
+        f.pack(fill='x', padx=12, pady=(0, 10))
+
+        Label(f, 'Page Reference String', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(4, 2))
+        self._pg_ref_wrap, self._pg_ref_e = styled_entry(
+            f, 'e.g. 7 0 1 2 0 3 0 4', 32)
+        self._pg_ref_wrap.pack(fill='x', pady=(0, 8))
+
+        Label(f, 'Number of Frames', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._pg_frm_wrap, self._pg_frm_e = styled_entry(f, 'e.g. 3', 32)
+        self._pg_frm_wrap.pack(fill='x', pady=(0, 8))
+
+        Label(f, 'Algorithm', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._pg_algo_var = tk.StringVar(value='LRU')
+        self._pg_algo_cb = styled_dropdown(
+            f, ['LRU', 'Optimal'], self._pg_algo_var, 28)
+        self._pg_algo_cb.pack(fill='x', pady=(0, 6))
+
+        tk.Label(f, text='LRU: least recently used page\nOptimal: farthest future use',
+                 font=('Inter', 8), bg=BG_CARD, fg=COL_GRAY,
+                 justify='left').pack(anchor='w')
+
+        # Buttons
+        bf = tk.Frame(card, bg=BG_CARD)
+        bf.pack(fill='x', padx=12, pady=(4, 12))
+        styled_btn(bf, '▶  Run Simulation',
+                   self._run_paging, '#238636', '#2ea043').pack(
+            fill='x', pady=(0, 6))
+        styled_btn(bf, '↺  Reset / Clear',
+                   self._reset_paging, '#21262d', '#30363d').pack(fill='x')
+
+        # Stats card
+        self._pg_stats_card = Card(parent)
+        self._pg_stats_card.pack(fill='x')
+        sf = tk.Frame(self._pg_stats_card, bg=BG_CARD)
+        sf.pack(fill='x', padx=12, pady=10)
+        self._pg_faults_lbl  = self._stat_box(sf, 'Page Faults', '--', COL_RED)
+        self._pg_hit_lbl     = self._stat_box(sf, 'Hit Ratio',   '--', COL_GREEN)
+        self._pg_total_lbl   = self._stat_box(sf, 'Total Refs',  '--', TXT_PRI)
+        self._pg_faults_lbl.pack(side='left', padx=(0, 8))
+        self._pg_hit_lbl.pack(side='left', padx=(0, 8))
+        self._pg_total_lbl.pack(side='left')
+
+    def _stat_box(self, parent, label, value, colour):
+        box = tk.Frame(parent, bg='#0d1117',
+                       highlightthickness=1, highlightbackground=BDR)
+        tk.Label(box, text=label, font=('Inter', 8, 'bold'),
+                 bg='#0d1117', fg=TXT_SEC).pack(padx=12, pady=(6, 0))
+        lbl = tk.Label(box, text=value, font=('JetBrains Mono', 18, 'bold'),
+                       bg='#0d1117', fg=colour)
+        lbl.pack(padx=12, pady=(0, 8))
+        box._value_label = lbl
+        return box
+
+    # ── Paging logic ─────────────────────────────────────────────
+
+    def _run_paging(self):
+        ref_str = get_entry(self._pg_ref_e, 'e.g. 7 0 1 2 0 3 0 4')
+        frm_str = get_entry(self._pg_frm_e, 'e.g. 3')
+        if not ref_str:
+            messagebox.showerror('Error', 'Please enter a page reference string.')
+            return
+        pages = parse_page_reference(ref_str)
+        if not pages:
+            messagebox.showerror('Error', 'Invalid page reference string.')
+            return
+        try:
+            nf = int(frm_str)
+            assert nf >= 1
+        except Exception:
+            messagebox.showerror('Error', 'Frames must be a positive integer.')
             return
 
+        algo = self._pg_algo_var.get()
+        self._set_status(f'Running {algo}…')
+        if algo == 'LRU':
+            snaps, faults, total = simulate_lru(pages, nf)
+        else:
+            snaps, faults, total = simulate_optimal(pages, nf)
+
+        hits = len(pages) - total
+        self._pg_faults_lbl._value_label.config(text=str(total))
+        self._pg_hit_lbl._value_label.config(
+            text=f'{hits/len(pages)*100:.1f}%')
+        self._pg_total_lbl._value_label.config(text=str(len(pages)))
+
+        self._draw_paging_table(pages, snaps, faults, nf)
+        self._draw_paging_graph(pages, faults)
+        self._set_status(
+            f'{algo} complete — {total} page fault(s), '
+            f'hit ratio {hits/len(pages)*100:.1f}%')
+
+    def _reset_paging(self):
+        self._pg_ref_e.delete(0, tk.END)
+        self._pg_ref_e.insert(0, 'e.g. 7 0 1 2 0 3 0 4')
+        self._pg_ref_e.config(fg=COL_GRAY)
+        self._pg_frm_e.delete(0, tk.END)
+        self._pg_frm_e.insert(0, 'e.g. 3')
+        self._pg_frm_e.config(fg=COL_GRAY)
+        self._pg_algo_var.set('LRU')
+        for box in (self._pg_faults_lbl, self._pg_hit_lbl, self._pg_total_lbl):
+            box._value_label.config(text='--')
+        for w in self._pg_tree_frame.winfo_children():
+            w.destroy()
+        self._pg_placeholder = tk.Label(
+            self._pg_tree_frame,
+            text='Run a simulation to see results',
+            font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY, pady=40)
+        self._pg_placeholder.pack()
+        self._pg_draw_empty_graph()
+        self._set_status('Paging tab reset')
+
+    def _draw_paging_table(self, pages, snaps, faults, nf):
+        for w in self._pg_tree_frame.winfo_children():
+            w.destroy()
+
+        cols = ['Step', 'Page'] + [f'Frame {i+1}' for i in range(nf)] + ['Fault?']
+        tv = ttk.Treeview(self._pg_tree_frame, columns=cols,
+                          show='headings', style='Dark.Treeview',
+                          height=min(len(pages), 14))
+        sy = ttk.Scrollbar(self._pg_tree_frame, orient='vertical',
+                            command=tv.yview)
+        sx = ttk.Scrollbar(self._pg_tree_frame, orient='horizontal',
+                            command=tv.xview)
+        tv.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+        sy.pack(side='right', fill='y')
+        sx.pack(side='bottom', fill='x')
+        tv.pack(fill='both', expand=True)
+
+        for c in cols:
+            tv.heading(c, text=c)
+            tv.column(c, width=68, anchor='center')
+
+        tv.tag_configure('fault', background='#7f1d1d', foreground='white')
+        tv.tag_configure('hit',   background='#14532d', foreground='white')
+
+        for i, page in enumerate(pages):
+            row = [i+1, page]
+            for j in range(nf):
+                row.append(snaps[i][j] if j < len(snaps[i]) else '-')
+            row.append('FAULT' if faults[i] else 'HIT')
+            tag = 'fault' if faults[i] else 'hit'
+            tv.insert('', tk.END, values=row, tags=(tag,))
+
+    def _pg_draw_empty_graph(self):
+        ax = self._pg_ax
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        self._pg_fig.patch.set_facecolor(BG_CARD)
+        ax.set_xlabel('Step', color=TXT_SEC, fontsize=9)
+        ax.set_ylabel('Cumulative Faults', color=TXT_SEC, fontsize=9)
+        ax.tick_params(colors=TXT_SEC, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(BDR)
+        self._pg_canvas.draw()
+
+    def _draw_paging_graph(self, pages, faults):
+        ax = self._pg_ax
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        self._pg_fig.patch.set_facecolor(BG_CARD)
+
+        cum = []
+        c = 0
+        for f in faults:
+            if f:
+                c += 1
+            cum.append(c)
+
+        xs = list(range(1, len(pages)+1))
+        ax.fill_between(xs, cum, alpha=0.25, color='#58a6ff')
+        ax.plot(xs, cum, color='#58a6ff', linewidth=2)
+        fault_xs = [xs[i] for i in range(len(faults)) if faults[i]]
+        fault_ys = [cum[i]  for i in range(len(faults)) if faults[i]]
+        ax.scatter(fault_xs, fault_ys, color='#f85149', zorder=5, s=40)
+
+        ax.set_xlabel('Step', color=TXT_SEC, fontsize=9)
+        ax.set_ylabel('Cumulative Faults', color=TXT_SEC, fontsize=9)
+        ax.tick_params(colors=TXT_SEC, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(BDR)
+        ax.set_xlim(1, len(pages))
+        ax.set_ylim(0, max(cum, default=1) + 1)
+        self._pg_fig.tight_layout()
+        self._pg_canvas.draw()
+
+    # ══════════════════════════════════════════════════════════════
+    #  TAB 2 — SEGMENTATION  (with First/Best/Worst + Compact)
+    # ══════════════════════════════════════════════════════════════
+
+    def _build_segmentation_page(self):
+        page = tk.Frame(self.tab_frame, bg=BG_DARK)
+
+        # ── Left column ──────────────────────────────────────────
+        left = tk.Frame(page, bg=BG_DARK, width=310)
+        left.pack(side='left', fill='y', padx=(0, 14))
+        left.pack_propagate(False)
+        self._build_seg_input(left)
+
+        # ── Right column ─────────────────────────────────────────
+        right = tk.Frame(page, bg=BG_DARK)
+        right.pack(side='left', fill='both', expand=True)
+
+        # Allocation results table
+        res_card = Card(right)
+        res_card.pack(fill='both', expand=True, pady=(0, 10))
+
+        hdr = tk.Frame(res_card, bg=BG_CARD)
+        hdr.pack(fill='x', padx=12, pady=(10, 4))
+        Label(hdr, 'Allocation Results', size=12, bold=True,
+              bg=BG_CARD).pack(side='left')
+        self._seg_status_lbl = tk.Label(
+            hdr, text='Add segments and run',
+            font=('Inter', 9), bg=BG_CARD, fg=TXT_SEC)
+        self._seg_status_lbl.pack(side='right')
+
+        self._seg_tree_frame = tk.Frame(res_card, bg=BG_CARD)
+        self._seg_tree_frame.pack(fill='both', expand=True,
+                                  padx=12, pady=(0, 8))
+        tk.Label(self._seg_tree_frame,
+                 text='Run segmentation to see results',
+                 font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY,
+                 pady=30).pack()
+
+        # Stats row
+        stats_card = Card(right)
+        stats_card.pack(fill='x', pady=(0, 10))
+        sf = tk.Frame(stats_card, bg=BG_CARD)
+        sf.pack(fill='x', padx=12, pady=10)
+        self._seg_used_box  = self._stat_box(sf, 'Used',          '--', COL_GREEN)
+        self._seg_free_box  = self._stat_box(sf, 'Free',          '--', COL_AMBE)
+        self._seg_frag_box  = self._stat_box(sf, 'Fragmentation', '--', COL_RED)
+        self._seg_used_box.pack(side='left', padx=(0, 8))
+        self._seg_free_box.pack(side='left', padx=(0, 8))
+        self._seg_frag_box.pack(side='left')
+
+        # Memory diagram card
+        diag_card = Card(right)
+        diag_card.pack(fill='x')
+        Label(diag_card, '  Memory Visualization', size=12, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 4))
+
+        self._seg_fig_frame = tk.Frame(diag_card, bg=BG_CARD)
+        self._seg_fig_frame.pack(fill='x', padx=12, pady=(0, 10))
+
+        self._seg_fig = Figure(figsize=(6, 1.2), facecolor=BG_CARD)
+        self._seg_ax  = self._seg_fig.add_subplot(111)
+        self._seg_canvas = FigureCanvasTkAgg(self._seg_fig, self._seg_fig_frame)
+        self._seg_canvas.get_tk_widget().pack(fill='x')
+        self._seg_draw_empty()
+
+        # ── Compact diff panel (initially hidden) ─────────────────
+        self._compact_frame = tk.Frame(diag_card, bg='#0d1117',
+                                       highlightthickness=1,
+                                       highlightbackground=BDR)
+        # not packed until Compact is run
+
+        self._build_compact_diff(self._compact_frame)
+
+        return page
+
+    def _build_seg_input(self, parent):
+        """Build the left-column input form for the segmentation tab."""
+        card = Card(parent)
+        card.pack(fill='x', pady=(0, 10))
+
+        Label(card, '  Add Segment', size=12, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 6))
+
+        f = tk.Frame(card, bg=BG_CARD)
+        f.pack(fill='x', padx=12, pady=(0, 8))
+
+        Label(f, 'Segment Name', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(4, 2))
+        self._sn_wrap, self._sn_e = styled_entry(f, 'e.g. Code, Stack', 30)
+        self._sn_wrap.pack(fill='x', pady=(0, 6))
+
+        Label(f, 'Segment Size (KB)', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._ss_wrap, self._ss_e = styled_entry(f, 'e.g. 100', 30)
+        self._ss_wrap.pack(fill='x', pady=(0, 6))
+
+        Label(f, 'Total Memory (KB)', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._tm_wrap, self._tm_e = styled_entry(f, '512', 30)
+        self._tm_wrap.pack(fill='x', pady=(0, 6))
+
+        # ── Fit Strategy dropdown ─────────────────────────────────
+        Label(f, 'Fit Strategy', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._fit_var = tk.StringVar(value='First Fit')
+        self._fit_cb  = styled_dropdown(
+            f, ['First Fit', 'Best Fit', 'Worst Fit'], self._fit_var, 28)
+        self._fit_cb.pack(fill='x', pady=(0, 2))
+        self._fit_cb.bind('<<ComboboxSelected>>', self._update_fit_hint)
+
+        self._fit_hint = tk.Label(
+            f, wraplength=260, justify='left',
+            font=('Inter', 8), bg=BG_CARD, fg=COL_GRAY)
+        self._fit_hint.pack(anchor='w', pady=(0, 6))
+        self._update_fit_hint()
+
+        # Buttons
+        bf = tk.Frame(card, bg=BG_CARD)
+        bf.pack(fill='x', padx=12, pady=(0, 8))
+        styled_btn(bf, '+ Add Segment',
+                   self._add_segment, '#238636', '#2ea043').pack(
+            fill='x', pady=(0, 4))
+        styled_btn(bf, '▶  Run Segmentation',
+                   self._run_segmentation, COL_BLUE, '#388bfd').pack(
+            fill='x', pady=(0, 4))
+        styled_btn(bf, 'Clear All',
+                   self._clear_segments, '#da3633', '#f85149').pack(
+            fill='x', pady=(0, 4))
+
+        # Compact button (disabled until a run happens)
+        self._compact_btn = styled_btn(
+            bf, '⚡ Compact Memory',
+            self._compact_memory, '#7c3aed', '#9333ea')
+        self._compact_btn.pack(fill='x')
+        self._compact_btn.config(state='disabled',
+                                  bg='#21262d', fg='#484f58')
+
+        tk.Label(bf,
+                 text='Compaction merges scattered free holes into\none contiguous block at the cost of copying.',
+                 font=('Inter', 7), bg=BG_CARD, fg=COL_GRAY,
+                 justify='left').pack(anchor='w', pady=(4, 0))
+
+        # Segment list
+        list_card = tk.Frame(parent, bg=BG_CARD,
+                             highlightthickness=1, highlightbackground=BDR)
+        list_card.pack(fill='x')
+
+        lh = tk.Frame(list_card, bg='#21262d')
+        lh.pack(fill='x')
+        tk.Label(lh, text='Segments List', font=('Inter', 10, 'bold'),
+                 bg='#21262d', fg=TXT_PRI, padx=10, pady=6).pack(side='left')
+        self._seg_count_lbl = tk.Label(
+            lh, text='0 segments', font=('Inter', 9),
+            bg='#21262d', fg=TXT_SEC, padx=10)
+        self._seg_count_lbl.pack(side='right')
+
+        self._seg_list_frame = tk.Frame(list_card, bg=BG_CARD)
+        self._seg_list_frame.pack(fill='x')
+        tk.Label(self._seg_list_frame,
+                 text='No segments added',
+                 font=('Inter', 10), bg=BG_CARD, fg=COL_GRAY,
+                 pady=20).pack()
+
+    def _update_fit_hint(self, event=None):
+        hints = {
+            'First Fit': 'Scans from the start; uses the first hole large enough. Fast but can leave awkward fragments.',
+            'Best Fit':  'Searches entire free list; picks the smallest fitting hole. Minimises waste per allocation.',
+            'Worst Fit': 'Picks the largest hole. Leaves bigger remnants for future large segments.',
+        }
+        self._fit_hint.config(text=hints.get(self._fit_var.get(), ''))
+
+    def _build_compact_diff(self, parent):
+        """Build the before/after compaction visualisation inside parent."""
+        tk.Label(parent, text='Compaction — Before vs After',
+                 font=('Inter', 10, 'bold'), bg='#0d1117', fg=TXT_PRI,
+                 padx=12, pady=8).pack(anchor='w')
+
+        # Before diagram
+        bf = tk.Frame(parent, bg='#0d1117')
+        bf.pack(fill='x', padx=12, pady=(0, 6))
+        tk.Label(bf, text='Before compaction',
+                 font=('Inter', 8), bg='#0d1117', fg=TXT_SEC).pack(anchor='w')
+        self._compact_before_fig = Figure(figsize=(5, 0.6), facecolor='#0d1117')
+        self._compact_before_ax  = self._compact_before_fig.add_subplot(111)
+        self._compact_before_canvas = FigureCanvasTkAgg(
+            self._compact_before_fig, bf)
+        self._compact_before_canvas.get_tk_widget().pack(fill='x')
+
+        # After diagram
+        af = tk.Frame(parent, bg='#0d1117')
+        af.pack(fill='x', padx=12, pady=(0, 8))
+        tk.Label(af, text='After compaction (one contiguous free block)',
+                 font=('Inter', 8), bg='#0d1117', fg=TXT_SEC).pack(anchor='w')
+        self._compact_after_fig = Figure(figsize=(5, 0.6), facecolor='#0d1117')
+        self._compact_after_ax  = self._compact_after_fig.add_subplot(111)
+        self._compact_after_canvas = FigureCanvasTkAgg(
+            self._compact_after_fig, af)
+        self._compact_after_canvas.get_tk_widget().pack(fill='x')
+
+        # Stats row
+        sr = tk.Frame(parent, bg='#0d1117')
+        sr.pack(fill='x', padx=12, pady=(0, 10))
+        self._cs_before = self._compact_stat(sr, 'Largest Free Before', '--')
+        self._cs_after  = self._compact_stat(sr, 'Contiguous Free After', '--')
+        self._cs_gain   = self._compact_stat(sr, 'Gain', '--')
+        self._cs_before.pack(side='left', padx=(0, 8), expand=True, fill='x')
+        self._cs_after.pack( side='left', padx=(0, 8), expand=True, fill='x')
+        self._cs_gain.pack(  side='left',               expand=True, fill='x')
+
+        tk.Label(parent,
+                 text='Note: Compaction is expensive — every allocated byte must be copied and\n'
+                      'base registers updated. Modern OSes avoid it by using paging.',
+                 font=('Inter', 7), bg='#0d1117', fg=COL_GRAY,
+                 justify='left', padx=12, pady=(0, 8)).pack(anchor='w')
+
+    def _compact_stat(self, parent, label, value):
+        box = tk.Frame(parent, bg='#161b22',
+                       highlightthickness=1, highlightbackground=BDR)
+        tk.Label(box, text=label, font=('Inter', 7, 'bold'),
+                 bg='#161b22', fg=TXT_SEC).pack(padx=8, pady=(6, 0))
+        lbl = tk.Label(box, text=value,
+                       font=('JetBrains Mono', 14, 'bold'),
+                       bg='#161b22', fg=COL_GREEN)
+        lbl.pack(padx=8, pady=(0, 6))
+        box._val = lbl
+        return box
+
+    # ── Segmentation logic ────────────────────────────────────────
+
+    def _add_segment(self):
+        name = get_entry(self._sn_e, 'e.g. Code, Stack').strip()
+        size_str = get_entry(self._ss_e, 'e.g. 100').strip()
+        if not name:
+            messagebox.showerror('Error', 'Please enter a segment name.')
+            return
         try:
             size = int(size_str)
-            if size <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Input Error", "Segment size must be a positive integer.")
+            assert size >= 1
+        except Exception:
+            messagebox.showerror('Error', 'Segment size must be a positive integer.')
             return
+        self.segments.append({'name': name, 'size': size})
+        self._refresh_seg_list()
+        self._sn_e.delete(0, tk.END)
+        self._sn_e.insert(0, 'e.g. Code, Stack')
+        self._sn_e.config(fg=COL_GRAY)
+        self._ss_e.delete(0, tk.END)
+        self._ss_e.insert(0, 'e.g. 100')
+        self._ss_e.config(fg=COL_GRAY)
+        self._set_status(f'Added "{name}" ({size} KB). Total segments: {len(self.segments)}')
 
-        self.segments.append((name, size))
-        self.seg_listbox.insert(tk.END, f"{name} ({size} KB)")
-        self.seg_count_label.configure(text=f"{len(self.segments)} segments")
-        self._update_seg_scrollbar()
+    def _delete_segment(self, idx):
+        removed = self.segments.pop(idx)
+        self._refresh_seg_list()
+        self._set_status(f'Removed "{removed["name"]}". Remaining: {len(self.segments)}')
 
-        self._reset_entry(self.seg_name_entry, "e.g. Code, Data, Stack")
-        self._reset_entry(self.seg_size_entry, "e.g. 100")
-        self.seg_name_entry.focus()
+    def _refresh_seg_list(self):
+        for w in self._seg_list_frame.winfo_children():
+            w.destroy()
+        self._seg_count_lbl.config(
+            text=f'{len(self.segments)} segment{"s" if len(self.segments)!=1 else ""}')
 
-    def _reset_entry(self, entry, placeholder):
-        """Reset entry to placeholder style."""
-        entry.delete(0, tk.END)
-        entry.insert(0, placeholder)
-        entry.configure(fg="#6e7681")
-
-    def _update_seg_scrollbar(self):
-        """Show or hide scrollbar based on list size."""
-        if len(self.segments) > self.seg_listbox.cget('height'):
-            self.scrollbar_y.pack(side="right", fill="y")
-        else:
-            self.scrollbar_y.pack_forget()
-
-    def _on_clear_segments(self):
-        """Handle Clear All button click."""
-        self.segments = []
-        self.seg_listbox.delete(0, tk.END)
-        self.seg_count_label.configure(text="0 segments")
-        self._update_seg_scrollbar()
-        self.seg_status_label.configure(text="Add segments and run")
-        self.seg_used_label.configure(text="Used: -- KB")
-        self.seg_free_label.configure(text="Free: -- KB")
-        self.seg_frag_label.configure(text="Fragmentation: -- KB")
-
-        self.seg_table_placeholder.pack(fill="both", expand=True)
-        self.seg_table_inner.pack_forget()
-
-        self._update_segment_diagram([], 512)
-
-    def _on_run_segmentation(self):
-        """Handle Run Segmentation button click."""
         if not self.segments:
-            messagebox.showerror("Input Error", "Please add at least one segment.")
+            tk.Label(self._seg_list_frame, text='No segments added',
+                     font=('Inter', 10), bg=BG_CARD, fg=COL_GRAY,
+                     pady=20).pack()
             return
 
-        total_mem_str = self.total_mem_entry.get().strip()
-        if not total_mem_str or total_mem_str == "e.g. 512":
-            total_mem = 512
-        else:
-            try:
-                total_mem = int(total_mem_str)
-                if total_mem <= 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showerror("Input Error", "Total memory must be a positive integer.")
-                return
-
-        allocations, stats = simulate_segmentation(self.segments, total_mem)
-
-        self._display_segment_results(allocations, stats)
-        self._update_segment_diagram(allocations, total_mem)
-
-    def _display_segment_results(self, allocations, stats):
-        """Display segmentation results in the Treeview table."""
-        self.seg_table_placeholder.pack_forget()
-        self.seg_table_inner.pack(fill="both", expand=True)
-
-        for item in self.seg_result_tree.get_children():
-            self.seg_result_tree.delete(item)
-
-        columns = ["Segment", "Base Address", "Size (KB)", "End Address", "Status"]
-        self.seg_result_tree["columns"] = columns
-        self.seg_result_tree["show"] = "headings"
-
-        for col in columns:
-            self.seg_result_tree.heading(col, text=col)
-            self.seg_result_tree.column(col, width=120, anchor="center")
-
-        failed_count = 0
-        for alloc in allocations:
-            row_values = [
-                alloc['name'],
-                str(alloc['base_address']),
-                str(alloc['size']),
-                str(alloc['end_address']),
-                alloc['status']
-            ]
-            tag = "failed" if alloc['status'] == 'Allocation Failed' else "allocated"
-            self.seg_result_tree.insert("", "end", values=row_values, tags=(tag,))
-            if alloc['status'] == 'Allocation Failed':
-                failed_count += 1
-
-        self.seg_used_label.configure(text=f"Used: {stats['used_memory']} KB")
-        self.seg_free_label.configure(text=f"Free: {stats['free_memory']} KB")
-        self.seg_frag_label.configure(text=f"Fragmentation: {stats['external_fragmentation']} KB")
-
-        if failed_count > 0:
-            self.seg_status_label.configure(text=f"{failed_count} failed", fg="#ef4444")
-        else:
-            self.seg_status_label.configure(text="All allocated", fg="#22c55e")
-
-    def _update_segment_diagram(self, allocations, total_memory):
-        """Update the memory visualization diagram."""
-        self.seg_ax.clear()
-        self.seg_ax.set_facecolor('#161b22')
-
-        colors = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ef4444', 
-                  '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1']
-        
-        if not allocations:
-            self.seg_ax.text(0.5, 0.5, 'Add segments to visualize memory allocation', 
-                            ha='center', va='center', transform=self.seg_ax.transAxes,
-                            color='#64748b', fontsize=12, style='italic')
-            self.seg_ax.set_xlim(0, 1)
-            self.seg_ax.set_ylim(0, 1)
-            self.seg_ax.axis('off')
-            self.seg_ax.set_title('Memory Block Diagram', color='#9ca3af', fontsize=12, pad=10)
-        else:
-            blocks = []
-            current_addr = 0
-            color_idx = 0
-
-            for alloc in allocations:
-                if alloc['status'] == 'Allocated':
-                    blocks.append({
-                        'name': alloc['name'],
-                        'start': current_addr,
-                        'size': alloc['size'],
-                        'color': colors[color_idx % len(colors)]
-                    })
-                    current_addr += alloc['size']
-                    color_idx += 1
-
-            free_start = current_addr
-            free_size = total_memory - current_addr
-
-            y_pos = 0.5
-            bar_height = 0.6
-
-            for i, block in enumerate(blocks):
-                width = block['size']
-                rect = Rectangle((block['start'], y_pos), width, bar_height,
-                                 facecolor=block['color'], edgecolor='white',
-                                 linewidth=1, alpha=0.9)
-                self.seg_ax.add_patch(rect)
-                
-                if width >= 15:
-                    self.seg_ax.text(block['start'] + width/2, y_pos + bar_height/2,
-                                   f"{block['name']}\n{width} KB",
-                                   ha='center', va='center', fontsize=9,
-                                   color='white', fontweight='bold')
-                elif width >= 5:
-                    self.seg_ax.text(block['start'] + width/2, y_pos + bar_height/2,
-                                   block['name'], ha='center', va='center',
-                                   fontsize=8, color='white', fontweight='bold')
-
-            if free_size > 0:
-                rect = Rectangle((free_start, y_pos), free_size, bar_height,
-                                     facecolor='#6b7280', edgecolor='white',
-                                     linewidth=1, alpha=0.5, hatch='///')
-                self.seg_ax.add_patch(rect)
-                if free_size >= 15:
-                    self.seg_ax.text(free_start + free_size/2, y_pos + bar_height/2,
-                                   f"FREE\n{free_size} KB", ha='center', va='center',
-                                   fontsize=9, color='#d1d5db', style='italic')
-
-            self.seg_ax.set_xlim(-5, total_memory + 10)
-            self.seg_ax.set_ylim(0, 1)
-            self.seg_ax.axis('off')
-            
-            self.seg_ax.set_title('Memory Block Diagram', color='#9ca3af', fontsize=12, pad=10)
-            
-            for i in range(0, total_memory + 1, 64):
-                self.seg_ax.axvline(x=i, color='#4b5563', linestyle='--', linewidth=0.5, alpha=0.5)
-                self.seg_ax.text(i, y_pos - 0.15, str(i), ha='center', va='top',
-                                fontsize=8, color='#9ca3af')
-
-            self.seg_ax.text(total_memory + 5, y_pos + bar_height/2, f'{total_memory} KB',
-                            ha='left', va='center', fontsize=8, color='#9ca3af')
-
-        self.seg_fig.tight_layout(pad=2.0)
-        self.seg_canvas.draw()
-
-    def _create_comparison_tab(self):
-        """Create the LRU vs Optimal comparison tab content."""
-        content = tk.Frame(self.content_frame, bg="#0f172a")
-        self.tab_contents.append(content)
-
-        scroll_canvas = tk.Canvas(content, bg="#0f172a", highlightthickness=0)
-        scrollbar = tk.Scrollbar(content, orient="vertical", command=scroll_canvas.yview)
-        scrollbar.configure(bg="#334155", activebackground="#475569", troughcolor="#1e293b", bd=0, highlightthickness=0)
-        scroll_canvas.configure(yscrollcommand=scrollbar.set)
-
-        scrollbar.pack(side="right", fill="y")
-        scroll_canvas.pack(side="left", fill="both", expand=True)
-
-        inner_frame = tk.Frame(scroll_canvas, bg="#0f172a")
-        inner_window = scroll_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
-
-        def on_configure(event):
-            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
-            scroll_canvas.itemconfig(inner_window, width=scroll_canvas.winfo_width())
-
-        scroll_canvas.bind('<Configure>', on_configure)
-        scroll_canvas.bind('<MouseWheel>', lambda e: scroll_canvas.yview_scroll(-1*(e.delta//120), "units"))
-
-        content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure(0, weight=1)
-
-        card = ModernCard(inner_frame)
-        card.pack(fill="x", padx=20, pady=20)
-
-        card_header = tk.Frame(card, bg="#1e293b")
-        card_header.pack(fill="x", padx=25, pady=(20, 10))
-
-        tk.Label(
-            card_header,
-            text="Algorithm Comparison",
-            font=("Inter", 18, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        input_container = tk.Frame(card, bg="#1e293b")
-        input_container.pack(fill="x", padx=25, pady=(10, 5))
-
-        input_row1 = tk.Frame(input_container, bg="#1e293b")
-        input_row1.pack(fill="x", pady=(0, 10))
-
-        left_col = tk.Frame(input_row1, bg="#1e293b")
-        left_col.pack(side="left", fill="x", expand=True, padx=(0, 15))
-
-        tk.Label(
-            left_col,
-            text="Page Reference String",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).pack(anchor="w", pady=(0, 5))
-
-        self.comp_page_ref_entry = ModernEntry(left_col, placeholder="e.g. 7 0 1 2 0 3 0 4 2 3 0 3", width=50)
-        self.comp_page_ref_entry.pack(fill="x")
-
-        right_col = tk.Frame(input_row1, bg="#1e293b")
-        right_col.pack(side="left", fill="x", expand=True, padx=(0, 15))
-
-        tk.Label(
-            right_col,
-            text="Number of Frames",
-            font=("Inter", 10, "bold"),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).pack(anchor="w", pady=(0, 5))
-
-        self.comp_frames_entry = ModernEntry(right_col, placeholder="e.g. 3", width=25)
-        self.comp_frames_entry.pack(fill="x")
-
-        btn_col = tk.Frame(input_row1, bg="#1e293b")
-        btn_col.pack(side="left", fill="both", padx=(15, 0))
-
-        tk.Label(
-            btn_col,
-            text="",
-            font=("Inter", 10),
-            bg="#1e293b",
-            fg=self.text_secondary
-        ).pack(anchor="w", pady=(0, 5))
-
-        self.compare_btn = AnimatedButton(
-            btn_col,
-            text="Compare Algorithms",
-            command=self._on_compare_clicked,
-            width=180,
-            height=44
-        )
-        self.compare_btn.pack()
-
-        self.reset_comp_btn = AnimatedButton(
-            btn_col,
-            text="Reset",
-            command=self._on_reset_comparison,
-            width=180,
-            height=36
-        )
-        self.reset_comp_btn.pack(pady=(8, 0))
-
-        self.comp_card = card
-        self.summary_table_frame = tk.Frame(card, bg="#1e293b")
-        self.summary_table_frame.pack(fill="x", padx=25, pady=(10, 10))
-
-        self._init_summary_table()
-
-        self.chart_frame = tk.Frame(card, bg="#1e293b")
-        self.chart_frame.pack(fill="x", padx=25, pady=(10, 10))
-
-        self._create_comparison_chart()
-
-        self.analysis_label = tk.Label(
-            card,
-            text="Run a comparison to see analysis",
-            font=("Inter", 12),
-            bg="#1e293b",
-            fg=self.text_secondary,
-            padx=15,
-            pady=12
-        )
-        self.analysis_label.pack(fill="x", padx=25, pady=(10, 10))
-
-        self.step_table_frame = tk.Frame(card, bg="#1e293b")
-        self.step_table_frame.pack(fill="both", expand=True, padx=25, pady=(10, 20))
-
-        self._create_step_comparison_table()
-
-    def _init_summary_table(self):
-        """Create the side-by-side summary comparison table."""
-        self.summary_table_frame = tk.Frame(self.comp_card, bg="#1e293b")
-
-        card_header = tk.Frame(self.summary_table_frame, bg="#1f2937")
-        card_header.pack(fill="x", padx=0, pady=(0, 5))
-
-        tk.Label(
-            card_header,
-            text="Performance Summary",
-            font=("Inter", 12, "bold"),
-            bg="#1f2937",
-            fg=self.text_primary
-        ).pack(side="left", padx=10, pady=8)
-
-        table_outer = tk.Frame(self.summary_table_frame, bg="#1f2937")
-        table_outer.pack(fill="x", padx=10, pady=(0, 10))
-
-        columns = ["Algorithm", "Total Faults", "Hit Ratio", "Efficiency"]
-        headers = ["Algorithm", "Total Faults", "Hit Ratio", "Efficiency"]
-
-        header_frame = tk.Frame(table_outer, bg="#374151")
-        header_frame.pack(fill="x")
-
-        col_widths = [140, 120, 100, 120]
-        for i, (col, width) in enumerate(zip(columns, col_widths)):
-            tk.Label(
-                header_frame,
-                text=headers[i],
-                font=("Inter", 10, "bold"),
-                bg="#374151",
-                fg=self.text_primary,
-                width=width // 8,
-                anchor="center",
-                pady=8
-            ).pack(side="left")
-
-        self.summary_rows_frame = tk.Frame(table_outer, bg="#1f2937")
-        self.summary_rows_frame.pack(fill="x")
-
-        self.lru_summary_labels = []
-        self.optimal_summary_labels = []
-
-        for row_data, row_labels in [("LRU", self.lru_summary_labels), ("Optimal", self.optimal_summary_labels)]:
-            row_frame = tk.Frame(self.summary_rows_frame, bg="#1f2937")
-            row_frame.pack(fill="x")
-
-            values = [row_data, "--", "--%", "--"]
-            for val, width in zip(values, col_widths):
-                lbl = tk.Label(
-                    row_frame,
-                    text=val,
-                    font=("Inter", 10),
-                    bg="#1f2937",
-                    fg=self.text_primary,
-                    width=width // 8,
-                    anchor="center",
-                    pady=6
-                )
-                lbl.pack(side="left")
-                row_labels.append(lbl)
-
-        self.summary_table_frame.pack(fill="x", padx=25, pady=(10, 10))
-
-    def _create_comparison_chart(self):
-        """Create the Matplotlib bar chart for comparison."""
-        chart_header = tk.Frame(self.chart_frame, bg="#1f2937")
-        chart_header.pack(fill="x", pady=(0, 5))
-
-        tk.Label(
-            chart_header,
-            text="Page Fault Comparison",
-            font=("Inter", 12, "bold"),
-            bg="#1f2937",
-            fg=self.text_primary
-        ).pack(side="left", padx=10, pady=8)
-
-        self.comp_fig = Figure(figsize=(8, 4), dpi=100, facecolor='#161b22')
-        self.comp_ax = self.comp_fig.add_subplot(111)
-        self.comp_ax.set_facecolor('#161b22')
-
-        self.comp_ax.set_xlabel('Algorithm', color='#9ca3af', fontsize=10)
-        self.comp_ax.set_ylabel('Number of Page Faults', color='#9ca3af', fontsize=10)
-        self.comp_ax.tick_params(colors='#9ca3af', labelsize=10)
-
-        self.comp_ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
-        self.comp_ax.spines['bottom'].set_color('#4b5563')
-        self.comp_ax.spines['left'].set_color('#4b5563')
-        self.comp_ax.spines['top'].set_visible(False)
-        self.comp_ax.spines['right'].set_visible(False)
-
-        self.comp_fig.tight_layout(pad=2.0)
-
-        chart_inner = tk.Frame(self.chart_frame, bg='#161b22')
-        chart_inner.pack(fill="x", padx=0, pady=(0, 5))
-
-        self.comp_canvas = FigureCanvasTkAgg(self.comp_fig, master=chart_inner)
-        self.comp_canvas.get_tk_widget().configure(bg='#161b22')
-        self.comp_canvas.get_tk_widget().pack(fill="x")
-
-        self._update_comparison_chart(0, 0)
-
-    def _update_comparison_chart(self, lru_faults, optimal_faults):
-        """Update the comparison bar chart."""
-        self.comp_ax.clear()
-        self.comp_ax.set_facecolor('#161b22')
-
-        self.comp_ax.set_xlabel('Algorithm', color='#9ca3af', fontsize=10)
-        self.comp_ax.set_ylabel('Number of Page Faults', color='#9ca3af', fontsize=10)
-        self.comp_ax.tick_params(colors='#9ca3af', labelsize=10)
-
-        self.comp_ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
-        self.comp_ax.spines['bottom'].set_color('#4b5563')
-        self.comp_ax.spines['left'].set_color('#4b5563')
-        self.comp_ax.spines['top'].set_visible(False)
-        self.comp_ax.spines['right'].set_visible(False)
-
-        if lru_faults == 0 and optimal_faults == 0:
-            self.comp_ax.text(0.5, 0.5, 'Run comparison to see chart',
-                             ha='center', va='center', transform=self.comp_ax.transAxes,
-                             color='#64748b', fontsize=12, style='italic')
-            self.comp_ax.set_xlim(0, 1)
-            self.comp_ax.set_ylim(0, 1)
-            self.comp_ax.axis('off')
-        else:
-            algorithms = ['LRU', 'Optimal']
-            faults = [lru_faults, optimal_faults]
-            colors = ['#f97316', '#3b82f6']
-
-            bars = self.comp_ax.bar(algorithms, faults, color=colors, width=0.5, edgecolor='white', linewidth=1)
-
-            for bar, fault_count in zip(bars, faults):
-                height = bar.get_height()
-                self.comp_ax.text(bar.get_x() + bar.get_width()/2., height,
-                                 f'{fault_count}',
-                                 ha='center', va='bottom', fontsize=12, fontweight='bold', color='white')
-
-            self.comp_ax.set_ylim(0, max(faults) * 1.2)
-            self.comp_ax.set_xticks(range(len(algorithms)))
-            self.comp_ax.set_xticklabels(algorithms)
-
-            for i, (alg, color) in enumerate(zip(algorithms, colors)):
-                rect = plt.Rectangle((0, 0), 0, 0, facecolor=color, label=alg)
-                self.comp_ax.legend(handles=[plt.Rectangle((0,0),1,1, facecolor=colors[0]),
-                                            plt.Rectangle((0,0),1,1, facecolor=colors[1])],
-                                   labels=algorithms, loc='upper right',
-                                   facecolor='#1e293b', edgecolor='#4b5563', labelcolor='#e5e7eb')
-
-        self.comp_fig.tight_layout(pad=2.0)
-        self.comp_canvas.draw()
-
-    def _create_step_comparison_table(self):
-        """Create the step-by-step comparison table."""
-        step_header = tk.Frame(self.step_table_frame, bg="#1f2937")
-        step_header.pack(fill="x", pady=(0, 5))
-
-        tk.Label(
-            step_header,
-            text="Step-by-Step Comparison",
-            font=("Inter", 12, "bold"),
-            bg="#1f2937",
-            fg=self.text_primary
-        ).pack(side="left", padx=10, pady=8)
-
-        self.step_table_container = tk.Frame(self.step_table_frame, bg="#1f2937")
-        self.step_table_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
-        self.step_table_placeholder = tk.Label(
-            self.step_table_container,
-            text="Run a comparison to see step-by-step execution",
-            font=("Inter", 12),
-            bg="#1f2937",
-            fg="#64748b",
-            pady=40
-        )
-        self.step_table_placeholder.pack(fill="both", expand=True)
-
-        self.step_table_inner = tk.Frame(self.step_table_container, bg="#1f2937")
-        self.step_table_inner.pack_forget()
-
-    def _on_compare_clicked(self):
-        """Handle Compare Algorithms button click."""
-        page_ref_str = self.comp_page_ref_entry.get()
-        frames_str = self.comp_frames_entry.get()
-
-        if not page_ref_str:
-            messagebox.showerror("Input Error", "Please enter a page reference string.")
+        for i, seg in enumerate(self.segments):
+            row = tk.Frame(self._seg_list_frame, bg=BG_CARD)
+            row.pack(fill='x', padx=4, pady=1)
+            tk.Frame(row, bg=BDR, width=1).pack(side='left', fill='y')
+            tk.Label(row, text=seg['name'],
+                     font=('Inter', 10, 'bold'),
+                     bg=BG_CARD, fg=TXT_PRI,
+                     padx=10, pady=6).pack(side='left')
+            tk.Label(row, text=f'{seg["size"]} KB',
+                     font=('JetBrains Mono', 9),
+                     bg=BG_CARD, fg=TXT_SEC).pack(side='left')
+            del_btn = tk.Button(
+                row, text='✕',
+                font=('Inter', 9),
+                bg=BG_CARD, fg=COL_GRAY,
+                activebackground=BG_CARD, activeforeground=COL_RED,
+                relief=tk.FLAT, bd=0, cursor='hand2',
+                command=lambda i=i: self._delete_segment(i))
+            del_btn.pack(side='right', padx=8)
+
+    def _clear_segments(self):
+        self.segments = []
+        self.last_seg_result = None
+        self._refresh_seg_list()
+        for w in self._seg_tree_frame.winfo_children():
+            w.destroy()
+        tk.Label(self._seg_tree_frame,
+                 text='Run segmentation to see results',
+                 font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY,
+                 pady=30).pack()
+        self._seg_status_lbl.config(text='Add segments and run', fg=TXT_SEC)
+        for box in (self._seg_used_box, self._seg_free_box, self._seg_frag_box):
+            box._value_label.config(text='--')
+        self._compact_btn.config(state='disabled', bg='#21262d', fg='#484f58')
+        self._compact_frame.pack_forget()
+        self._seg_draw_empty()
+        self._set_status('Segmentation cleared')
+
+    def _run_segmentation(self):
+        if not self.segments:
+            messagebox.showerror('Error', 'Please add at least one segment.')
             return
-
-        if not frames_str:
-            messagebox.showerror("Input Error", "Please enter the number of frames.")
-            return
-
-        pages = parse_page_reference(page_ref_str)
-        if pages is None or len(pages) == 0:
-            messagebox.showerror("Input Error", "Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).")
-            return
-
+        tm_str = get_entry(self._tm_e, '512').strip()
         try:
-            num_frames = int(frames_str)
-            if num_frames <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Input Error", "Number of frames must be a positive integer (at least 1).")
+            total_mem = int(tm_str) if tm_str else 512
+            assert total_mem >= 1
+        except Exception:
+            messagebox.showerror('Error', 'Total memory must be a positive integer.')
             return
 
-        self.compare_btn.configure(state="disabled")
-        self._update_status_bar("Running comparison...")
-        
+        strategy_map = {'First Fit': 'first', 'Best Fit': 'best', 'Worst Fit': 'worst'}
+        strategy = strategy_map[self._fit_var.get()]
+
+        self._set_status('Running segmentation…')
+        allocs, stats, free_list = simulate_segmentation(
+            self.segments, total_mem, strategy)
+
+        self.last_seg_result = {
+            'allocs': allocs, 'stats': stats,
+            'free_list': free_list, 'total_mem': total_mem,
+            'strategy': strategy,
+        }
+
+        self._draw_seg_table(allocs, strategy)
+        self._draw_seg_diagram(allocs, total_mem)
+        self._update_seg_stats(stats)
+
+        failed = sum(1 for a in allocs if a['status'] == 'Failed')
+        self._seg_status_lbl.config(
+            text=f'{failed} failed' if failed else 'All allocated',
+            fg=COL_RED if failed else COL_GREEN)
+
+        has_alloc = any(a['status'] == 'Allocated' for a in allocs)
+        if has_alloc:
+            self._compact_btn.config(state='normal', bg='#7c3aed', fg='white')
+        else:
+            self._compact_btn.config(state='disabled', bg='#21262d', fg='#484f58')
+
+        self._compact_frame.pack_forget()
+        self._set_status(
+            f'Segmentation ({self._fit_var.get()}) complete — '
+            f'{len(allocs)} segment(s), {failed} failed')
+
+    def _draw_seg_table(self, allocs, strategy):
+        for w in self._seg_tree_frame.winfo_children():
+            w.destroy()
+
+        strategy_label = {'first': 'First Fit',
+                          'best':  'Best Fit',
+                          'worst': 'Worst Fit'}.get(strategy, strategy)
+
+        cols = ['Segment', 'Base Addr', 'Size (KB)',
+                'End Addr', 'Hole (KB)', 'Strategy', 'Status']
+        tv = ttk.Treeview(self._seg_tree_frame, columns=cols,
+                          show='headings', style='Dark.Treeview',
+                          height=min(len(allocs)+1, 12))
+        sy = ttk.Scrollbar(self._seg_tree_frame, orient='vertical',
+                            command=tv.yview)
+        tv.configure(yscrollcommand=sy.set)
+        sy.pack(side='right', fill='y')
+        tv.pack(fill='both', expand=True)
+
+        widths = [90, 80, 80, 80, 80, 80, 90]
+        for c, w in zip(cols, widths):
+            tv.heading(c, text=c)
+            tv.column(c, width=w, anchor='center')
+
+        tv.tag_configure('ok',  background='#14532d', foreground='white')
+        tv.tag_configure('bad', background='#7f1d1d', foreground='white')
+
+        for a in allocs:
+            row = [a['name'], a['base'], a['size'], a['end'],
+                   a['hole_size'] if a['hole_size'] is not None else '—',
+                   strategy_label, a['status']]
+            tv.insert('', tk.END, values=row,
+                      tags=('ok' if a['status'] == 'Allocated' else 'bad',))
+
+    def _update_seg_stats(self, stats):
+        self._seg_used_box._value_label.config(
+            text=f'{stats["used_memory"]} KB')
+        self._seg_free_box._value_label.config(
+            text=f'{stats["free_memory"]} KB')
+        self._seg_frag_box._value_label.config(
+            text=f'{stats["external_fragmentation"]} KB')
+
+    def _seg_draw_empty(self):
+        ax = self._seg_ax
+        ax.clear()
+        ax.set_facecolor('#21262d')
+        self._seg_fig.patch.set_facecolor(BG_CARD)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+        ax.text(0.5, 0.5, 'Run segmentation to see memory layout',
+                ha='center', va='center',
+                color=COL_GRAY, fontsize=9, transform=ax.transAxes)
+        self._seg_fig.tight_layout()
+        self._seg_canvas.draw()
+
+    def _draw_seg_diagram(self, allocs, total_mem, compacted=False):
+        """Draw the horizontal memory bar.
+
+        If compacted=True, draw all allocated segments contiguously
+        starting at address 0, with free space at the end.
+        """
+        ax = self._seg_ax
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        self._seg_fig.patch.set_facecolor(BG_CARD)
+        ax.set_xlim(0, total_mem)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+
+        if compacted:
+            # Re-position allocated segments contiguously
+            cursor = 0
+            allocated = [a for a in allocs if a['status'] == 'Allocated']
+            for ci, a in enumerate(allocated):
+                colour = SEG_COLOURS[ci % len(SEG_COLOURS)]
+                rect = mpatches.FancyBboxPatch(
+                    (cursor, 0.1), a['size'], 0.8,
+                    boxstyle='square,pad=0', color=colour)
+                ax.add_patch(rect)
+                if a['size'] > total_mem * 0.06:
+                    ax.text(cursor + a['size']/2, 0.5,
+                            f'{a["name"]}\n{a["size"]}KB',
+                            ha='center', va='center',
+                            color='white', fontsize=7, fontweight='bold')
+                cursor += a['size']
+            if cursor < total_mem:
+                rect = mpatches.FancyBboxPatch(
+                    (cursor, 0.1), total_mem - cursor, 0.8,
+                    boxstyle='square,pad=0', color='#30363d')
+                ax.add_patch(rect)
+                ax.text(cursor + (total_mem - cursor)/2, 0.5,
+                        f'FREE\n{total_mem - cursor} KB',
+                        ha='center', va='center',
+                        color=TXT_SEC, fontsize=7, style='italic')
+        else:
+            cursor = 0
+            ci = 0
+            for a in allocs:
+                if a['status'] == 'Allocated':
+                    colour = SEG_COLOURS[ci % len(SEG_COLOURS)]
+                    rect = mpatches.FancyBboxPatch(
+                        (cursor, 0.1), a['size'], 0.8,
+                        boxstyle='square,pad=0', color=colour)
+                    ax.add_patch(rect)
+                    if a['size'] > total_mem * 0.06:
+                        ax.text(cursor + a['size']/2, 0.5,
+                                f'{a["name"]}\n{a["size"]}KB',
+                                ha='center', va='center',
+                                color='white', fontsize=7, fontweight='bold')
+                    cursor += a['size']
+                    ci += 1
+
+            if cursor < total_mem:
+                rect = mpatches.FancyBboxPatch(
+                    (cursor, 0.1), total_mem - cursor, 0.8,
+                    boxstyle='square,pad=0', color='#30363d')
+                ax.add_patch(rect)
+                ax.text(cursor + (total_mem - cursor)/2, 0.5,
+                        f'FREE\n{total_mem - cursor} KB',
+                        ha='center', va='center',
+                        color=TXT_SEC, fontsize=7, style='italic')
+
+        ax.text(0, -0.1, '0', ha='center', va='top',
+                color=TXT_SEC, fontsize=7, transform=ax.transData)
+        ax.text(total_mem, -0.1, f'{total_mem} KB', ha='center', va='top',
+                color=TXT_SEC, fontsize=7, transform=ax.transData)
+
+        self._seg_fig.tight_layout()
+        self._seg_canvas.draw()
+
+    # ── Compact Memory ────────────────────────────────────────────
+
+    def _compact_memory(self):
+        if not self.last_seg_result:
+            return
+        r = self.last_seg_result
+        allocs    = r['allocs']
+        total_mem = r['total_mem']
+        free_list = r['free_list']
+
+        allocated  = [a for a in allocs if a['status'] == 'Allocated']
+        used_mem   = sum(a['size'] for a in allocated)
+        free_total = total_mem - used_mem
+
+        largest_before = max((h['size'] for h in free_list), default=0)
+        gained = free_total - largest_before
+
+        # Redraw main diagram in compacted state
+        self._draw_seg_diagram(allocs, total_mem, compacted=True)
+
+        # Show diff panel
+        self._compact_frame.pack(fill='x', padx=0, pady=(8, 0))
+
+        self._draw_compact_bar(self._compact_before_ax,
+                               self._compact_before_canvas,
+                               largest_before, total_mem,
+                               colour='#da3633',
+                               label=f'{largest_before} KB largest free hole')
+
+        self._draw_compact_bar(self._compact_after_ax,
+                               self._compact_after_canvas,
+                               free_total, total_mem,
+                               colour='#238636',
+                               label=f'{free_total} KB contiguous')
+
+        self._cs_before._val.config(text=f'{largest_before} KB')
+        self._cs_after._val.config(text=f'{free_total} KB')
+        self._cs_gain._val.config(
+            text=f'+{gained} KB' if gained >= 0 else f'{gained} KB')
+
+        self._set_status(
+            f'Compaction complete — free space merged '
+            f'{largest_before} KB → {free_total} KB contiguous')
+
+    def _draw_compact_bar(self, ax, canvas, value, total, colour, label):
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        ax.figure.patch.set_facecolor('#0d1117')
+        ax.set_xlim(0, total)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+
+        filled = max(value, 0)
+        if filled > 0:
+            rect = mpatches.FancyBboxPatch(
+                (0, 0.15), filled, 0.7,
+                boxstyle='square,pad=0', color=colour, alpha=0.85)
+            ax.add_patch(rect)
+
+        # Background track
+        bg_rect = mpatches.FancyBboxPatch(
+            (0, 0.15), total, 0.7,
+            boxstyle='square,pad=0', color='#21262d', zorder=0)
+        ax.add_patch(bg_rect)
+        if filled > 0:
+            ax.add_patch(rect)
+
+        pct = filled / total * 100 if total else 0
+        ax.text(filled / 2 if filled > 0 else total/2,
+                0.5, label,
+                ha='center', va='center',
+                color='white', fontsize=8, fontweight='bold',
+                clip_on=True)
+        ax.text(total, 0.5, f'{pct:.1f}%',
+                ha='right', va='center',
+                color=TXT_SEC, fontsize=7)
+        ax.figure.tight_layout()
+        canvas.draw()
+
+    # ══════════════════════════════════════════════════════════════
+    #  TAB 3 — COMPARISON (LRU vs Optimal)
+    # ══════════════════════════════════════════════════════════════
+
+    def _build_comparison_page(self):
+        page = tk.Frame(self.tab_frame, bg=BG_DARK)
+
+        # Config card (top)
+        cfg = Card(page)
+        cfg.pack(fill='x', pady=(0, 10))
+
+        hdr = tk.Frame(cfg, bg=BG_CARD)
+        hdr.pack(fill='x', padx=12, pady=(10, 6))
+        Label(hdr, 'Algorithm Comparison', size=12, bold=True,
+              bg=BG_CARD).pack(side='left')
+
+        inp = tk.Frame(cfg, bg=BG_CARD)
+        inp.pack(fill='x', padx=12, pady=(0, 10))
+
+        # Page reference
+        tk.Frame(inp, bg=BG_CARD).pack(side='left', fill='x', expand=True)
+        left_inp = tk.Frame(inp, bg=BG_CARD)
+        left_inp.pack(side='left', fill='x', expand=True)
+        Label(left_inp, 'Page Reference String', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._cmp_ref_wrap, self._cmp_ref_e = styled_entry(
+            left_inp, 'e.g. 7 0 1 2 0 3 0 4', 36)
+        self._cmp_ref_wrap.pack(fill='x', pady=(0, 0))
+
+        tk.Frame(inp, bg=BG_CARD, width=20).pack(side='left')
+
+        right_inp = tk.Frame(inp, bg=BG_CARD)
+        right_inp.pack(side='left', fill='x')
+        Label(right_inp, 'Number of Frames', size=9, bold=True,
+              colour=TXT_SEC, bg=BG_CARD).pack(anchor='w', pady=(0, 2))
+        self._cmp_frm_wrap, self._cmp_frm_e = styled_entry(
+            right_inp, 'e.g. 3', 14)
+        self._cmp_frm_wrap.pack(fill='x')
+
+        bf = tk.Frame(cfg, bg=BG_CARD)
+        bf.pack(fill='x', padx=12, pady=(0, 10))
+        styled_btn(bf, '⚡ Compare Algorithms',
+                   self._run_comparison, '#238636', '#2ea043').pack(
+            side='left', padx=(0, 8))
+        styled_btn(bf, '↺ Reset',
+                   self._reset_comparison, '#21262d', '#30363d').pack(
+            side='left')
+
+        # Summary + chart row
+        mid = tk.Frame(page, bg=BG_DARK)
+        mid.pack(fill='both', expand=True, pady=(0, 10))
+
+        # Summary table (left)
+        sum_card = Card(mid)
+        sum_card.pack(side='left', fill='y', padx=(0, 10))
+        Label(sum_card, '  Performance Summary', size=11, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 6))
+        self._cmp_summary_frame = tk.Frame(sum_card, bg=BG_CARD)
+        self._cmp_summary_frame.pack(padx=12, pady=(0, 10))
+        self._build_cmp_summary_table()
+
+        # Analysis box
+        self._cmp_analysis = tk.Label(
+            sum_card,
+            text='Run a comparison to see analysis',
+            font=('Inter', 10), bg='#0d1117', fg=TXT_SEC,
+            wraplength=300, justify='center', pady=14, padx=12)
+        self._cmp_analysis.pack(fill='x', padx=12, pady=(0, 10))
+
+        # Bar chart (right)
+        chart_card = Card(mid)
+        chart_card.pack(side='left', fill='both', expand=True)
+        Label(chart_card, '  Page Fault Comparison', size=11, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 4))
+        self._cmp_chart_frame = tk.Frame(chart_card, bg=BG_CARD)
+        self._cmp_chart_frame.pack(fill='both', expand=True, padx=12,
+                                   pady=(0, 10))
+        self._cmp_fig = Figure(figsize=(4, 3), facecolor=BG_CARD)
+        self._cmp_ax  = self._cmp_fig.add_subplot(111)
+        self._cmp_canvas = FigureCanvasTkAgg(self._cmp_fig, self._cmp_chart_frame)
+        self._cmp_canvas.get_tk_widget().pack(fill='both', expand=True)
+        self._draw_cmp_chart_empty()
+
+        # Step-by-step table (bottom)
+        step_card = Card(page)
+        step_card.pack(fill='both', expand=True)
+        Label(step_card, '  Step-by-Step Comparison', size=11, bold=True,
+              bg=BG_CARD).pack(anchor='w', pady=(10, 4))
+        self._cmp_tree_frame = tk.Frame(step_card, bg=BG_CARD)
+        self._cmp_tree_frame.pack(fill='both', expand=True, padx=12,
+                                  pady=(0, 10))
+        tk.Label(self._cmp_tree_frame,
+                 text='Run a comparison to see step-by-step execution',
+                 font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY,
+                 pady=30).pack()
+
+        return page
+
+    def _build_cmp_summary_table(self):
+        """Build the static summary table structure."""
+        headers = ['Algorithm', 'Total Faults', 'Hit Ratio', 'Efficiency']
+        widths  = [90, 100, 90, 90]
+        f = self._cmp_summary_frame
+
+        for col, (h, w) in enumerate(zip(headers, widths)):
+            tk.Label(f, text=h, font=('Inter', 9, 'bold'),
+                     bg='#21262d', fg=TXT_SEC,
+                     width=w//8, relief='flat', pady=6).grid(
+                row=0, column=col, sticky='nsew', padx=1, pady=(0, 1))
+
+        # LRU row
+        self._cmp_lru_vals = []
+        for col in range(4):
+            lbl = tk.Label(f, text='--',
+                           font=('JetBrains Mono', 10),
+                           bg='#1f2937', fg='#f97316',
+                           width=widths[col]//8, pady=8)
+            lbl.grid(row=1, column=col, sticky='nsew', padx=1, pady=1)
+            self._cmp_lru_vals.append(lbl)
+        self._cmp_lru_vals[0].config(text='LRU', font=('Inter', 10, 'bold'))
+
+        # Optimal row
+        self._cmp_opt_vals = []
+        for col in range(4):
+            lbl = tk.Label(f, text='--',
+                           font=('JetBrains Mono', 10),
+                           bg='#1f2937', fg='#3b82f6',
+                           width=widths[col]//8, pady=8)
+            lbl.grid(row=2, column=col, sticky='nsew', padx=1, pady=1)
+            self._cmp_opt_vals.append(lbl)
+        self._cmp_opt_vals[0].config(text='Optimal', font=('Inter', 10, 'bold'))
+
+    # ── Comparison logic ──────────────────────────────────────────
+
+    def _run_comparison(self):
+        ref_str = get_entry(self._cmp_ref_e, 'e.g. 7 0 1 2 0 3 0 4')
+        frm_str = get_entry(self._cmp_frm_e, 'e.g. 3')
+        if not ref_str:
+            messagebox.showerror('Error', 'Please enter a page reference string.')
+            return
+        pages = parse_page_reference(ref_str)
+        if not pages:
+            messagebox.showerror('Error', 'Invalid page reference string.')
+            return
         try:
-            lru_snapshots, lru_faults_list, lru_total = simulate_lru(pages, num_frames)
-            opt_snapshots, opt_faults_list, opt_total = simulate_optimal(pages, num_frames)
+            nf = int(frm_str)
+            assert nf >= 1
+        except Exception:
+            messagebox.showerror('Error', 'Frames must be a positive integer.')
+            return
 
-            self._update_comparison_results(pages, lru_snapshots, lru_faults_list, lru_total,
-                                            opt_snapshots, opt_faults_list, opt_total, num_frames)
-            self._update_status_bar(f"Comparison complete: LRU={lru_total} faults, Optimal={opt_total} faults")
-        except Exception as e:
-            messagebox.showerror("Error", f"Comparison failed: {str(e)}")
-            self._update_status_bar("Comparison failed")
-        finally:
-            self.compare_btn.configure(state="normal")
+        self._set_status('Running comparison…')
+        lru_snaps, lru_faults, lru_total = simulate_lru(pages, nf)
+        opt_snaps, opt_faults, opt_total = simulate_optimal(pages, nf)
+        n = len(pages)
 
-    def _update_comparison_results(self, pages, lru_snapshots, lru_faults, lru_total,
-                                   opt_snapshots, opt_faults, opt_total, num_frames):
-        """Update all comparison results: summary, chart, analysis, and step table."""
-        total_refs = len(pages)
-        lru_hits = total_refs - lru_total
-        opt_hits = total_refs - opt_total
-        lru_hit_ratio = (lru_hits / total_refs * 100) if total_refs > 0 else 0
-        opt_hit_ratio = (opt_hits / total_refs * 100) if total_refs > 0 else 0
-        lru_eff = f"{(lru_hits / lru_total * 100):.1f}%" if lru_total > 0 else "N/A"
-        opt_eff = f"{(opt_hits / opt_total * 100):.1f}%" if opt_total > 0 else "N/A"
+        lru_hit = (n - lru_total) / n * 100
+        opt_hit = (n - opt_total) / n * 100
+        lru_eff = (n - lru_total) / lru_total * 100 if lru_total else float('inf')
+        opt_eff = (n - opt_total) / opt_total * 100 if opt_total else float('inf')
 
-        for lbl in self.lru_summary_labels:
-            lbl.configure(fg=self.text_primary)
-        for lbl in self.optimal_summary_labels:
-            lbl.configure(fg=self.text_primary)
+        def eff_str(v):
+            return f'{v:.1f}%' if v != float('inf') else 'N/A'
 
-        self.lru_summary_labels[0].configure(text="LRU", fg="#f97316")
-        self.lru_summary_labels[1].configure(text=str(lru_total))
-        self.lru_summary_labels[2].configure(text=f"{lru_hit_ratio:.1f}%")
-        self.lru_summary_labels[3].configure(text=lru_eff)
+        self._cmp_lru_vals[1].config(text=str(lru_total))
+        self._cmp_lru_vals[2].config(text=f'{lru_hit:.1f}%')
+        self._cmp_lru_vals[3].config(text=eff_str(lru_eff))
+        self._cmp_opt_vals[1].config(text=str(opt_total))
+        self._cmp_opt_vals[2].config(text=f'{opt_hit:.1f}%')
+        self._cmp_opt_vals[3].config(text=eff_str(opt_eff))
 
-        self.optimal_summary_labels[0].configure(text="Optimal", fg="#3b82f6")
-        self.optimal_summary_labels[1].configure(text=str(opt_total))
-        self.optimal_summary_labels[2].configure(text=f"{opt_hit_ratio:.1f}%")
-        self.optimal_summary_labels[3].configure(text=opt_eff)
+        self._draw_cmp_chart(lru_total, opt_total)
+        self._draw_cmp_step_table(
+            pages, lru_snaps, lru_faults, opt_snaps, opt_faults, nf)
 
-        self._update_comparison_chart(lru_total, opt_total)
-
-        if lru_total > opt_total:
+        if opt_total < lru_total:
             diff = lru_total - opt_total
-            pct = (diff / lru_total * 100) if lru_total > 0 else 0
-            analysis_text = f"Optimal algorithm produced {diff} fewer page faults than LRU ({pct:.1f}% improvement)"
-        elif opt_total > lru_total:
+            analysis = (f'Optimal produced {diff} fewer fault(s) than LRU '
+                        f'({diff/lru_total*100:.1f}% improvement).')
+            self._cmp_analysis.config(fg=COL_GREEN,
+                                       bg='rgba(35,134,54,0.1)' if False else '#0d1117')
+        elif lru_total < opt_total:
             diff = opt_total - lru_total
-            pct = (diff / opt_total * 100) if opt_total > 0 else 0
-            analysis_text = f"LRU algorithm produced {diff} fewer page faults than Optimal ({pct:.1f}% improvement)"
+            analysis = (f'LRU produced {diff} fewer fault(s) than Optimal '
+                        f'({diff/opt_total*100:.1f}% improvement).')
+            self._cmp_analysis.config(fg=COL_AMBE)
         else:
-            analysis_text = "Both algorithms produced the same number of page faults"
+            analysis = 'Both algorithms produced the same number of page faults.'
+            self._cmp_analysis.config(fg=TXT_SEC)
+        self._cmp_analysis.config(text=analysis)
+        self._set_status(
+            f'Comparison complete — LRU {lru_total} fault(s), '
+            f'Optimal {opt_total} fault(s)')
 
-        self.analysis_label.configure(text=analysis_text, fg=self.text_primary, bg="#1e293b")
+    def _reset_comparison(self):
+        self._cmp_ref_e.delete(0, tk.END)
+        self._cmp_ref_e.insert(0, 'e.g. 7 0 1 2 0 3 0 4')
+        self._cmp_ref_e.config(fg=COL_GRAY)
+        self._cmp_frm_e.delete(0, tk.END)
+        self._cmp_frm_e.insert(0, 'e.g. 3')
+        self._cmp_frm_e.config(fg=COL_GRAY)
+        for lbl in self._cmp_lru_vals[1:] + self._cmp_opt_vals[1:]:
+            lbl.config(text='--')
+        self._cmp_analysis.config(
+            text='Run a comparison to see analysis', fg=TXT_SEC)
+        self._draw_cmp_chart_empty()
+        for w in self._cmp_tree_frame.winfo_children():
+            w.destroy()
+        tk.Label(self._cmp_tree_frame,
+                 text='Run a comparison to see step-by-step execution',
+                 font=('Inter', 11), bg=BG_CARD, fg=COL_GRAY,
+                 pady=30).pack()
+        self._set_status('Comparison tab reset')
 
-        self._display_step_comparison(pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults, num_frames)
+    def _draw_cmp_chart_empty(self):
+        ax = self._cmp_ax
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        self._cmp_fig.patch.set_facecolor(BG_CARD)
+        ax.set_ylabel('Page Faults', color=TXT_SEC, fontsize=9)
+        ax.tick_params(colors=TXT_SEC, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(BDR)
+        ax.bar(['LRU', 'Optimal'], [0, 0],
+               color=['#f97316', '#3b82f6'], width=0.5)
+        self._cmp_fig.tight_layout()
+        self._cmp_canvas.draw()
 
-    def _display_step_comparison(self, pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults, num_frames):
-        """Display the step-by-step comparison table."""
-        self.step_table_placeholder.pack_forget()
-        self.step_table_inner.pack_forget()
+    def _draw_cmp_chart(self, lru_total, opt_total):
+        ax = self._cmp_ax
+        ax.clear()
+        ax.set_facecolor('#0d1117')
+        self._cmp_fig.patch.set_facecolor(BG_CARD)
 
-        self.step_table_inner = tk.Frame(self.step_table_container, bg="#1f2937")
-        self.step_table_inner.pack(fill="both", expand=True)
+        bars = ax.bar(['LRU', 'Optimal'], [lru_total, opt_total],
+                      color=['#f97316', '#3b82f6'], width=0.5,
+                      zorder=3)
+        for bar, val in zip(bars, [lru_total, opt_total]):
+            ax.text(bar.get_x() + bar.get_width()/2,
+                    bar.get_height() + 0.15,
+                    str(val),
+                    ha='center', va='bottom',
+                    color=TXT_PRI, fontsize=11, fontweight='bold')
 
-        scrollbar_y = ttk.Scrollbar(self.step_table_inner, orient="vertical")
-        scrollbar_y.pack(side="right", fill="y")
+        ax.set_ylabel('Page Faults', color=TXT_SEC, fontsize=9)
+        ax.tick_params(colors=TXT_SEC, labelsize=9)
+        ax.set_facecolor('#0d1117')
+        for spine in ax.spines.values():
+            spine.set_edgecolor(BDR)
+        ax.grid(axis='y', color=BDR, linewidth=0.5, zorder=0)
+        ax.set_ylim(0, max(lru_total, opt_total) * 1.3 + 1)
+        self._cmp_fig.tight_layout()
+        self._cmp_canvas.draw()
 
-        scrollbar_x = ttk.Scrollbar(self.step_table_inner, orient="horizontal")
-        scrollbar_x.pack(side="bottom", fill="x")
+    def _draw_cmp_step_table(self, pages,
+                              lru_snaps, lru_faults,
+                              opt_snaps, opt_faults, nf):
+        for w in self._cmp_tree_frame.winfo_children():
+            w.destroy()
 
-        self.step_tree = ttk.Treeview(self.step_table_inner, show="headings", style="Modern.Treeview",
-                                      yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set,
-                                      height=10)
-        scrollbar_y.configure(command=self.step_tree.yview)
-        scrollbar_x.configure(command=self.step_tree.xview)
+        cols = ['Step', 'Page',
+                'LRU Frames', 'LRU',
+                'Optimal Frames', 'Optimal']
+        tv = ttk.Treeview(self._cmp_tree_frame, columns=cols,
+                          show='headings', style='Dark.Treeview',
+                          height=min(len(pages), 14))
+        sy = ttk.Scrollbar(self._cmp_tree_frame, orient='vertical',
+                            command=tv.yview)
+        tv.configure(yscrollcommand=sy.set)
+        sy.pack(side='right', fill='y')
+        tv.pack(fill='both', expand=True)
 
-        self.step_tree.pack(side="left", fill="both", expand=True)
+        widths = [50, 55, 160, 70, 160, 70]
+        for c, w in zip(cols, widths):
+            tv.heading(c, text=c)
+            tv.column(c, width=w, anchor='center')
 
-        columns = ["Step", "Page", "LRU Frames", "LRU Fault", "Optimal Frames", "Optimal Fault"]
-        self.step_tree["columns"] = columns
-        self.step_tree["show"] = "headings"
+        tv.tag_configure('both_fault', background='#7f1d1d', foreground='white')
+        tv.tag_configure('lru_fault',  background='#78350f', foreground='white')
+        tv.tag_configure('opt_fault',  background='#1e3a5f', foreground='white')
+        tv.tag_configure('both_hit',   background='#14532d', foreground='white')
 
-        col_widths = [50, 50, 150, 80, 150, 90]
-        for col, width in zip(columns, col_widths):
-            self.step_tree.heading(col, text=col)
-            self.step_tree.column(col, width=width, anchor="center")
-
-        for i, (page, lru_frames, lru_fault, opt_frames, opt_fault) in enumerate(
-                zip(pages, lru_snapshots, lru_faults, opt_snapshots, opt_faults)):
-
-            lru_frames_str = str(lru_frames) if lru_frames else "[]"
-            opt_frames_str = str(opt_frames) if opt_frames else "[]"
-            lru_fault_str = "FAULT" if lru_fault else "HIT"
-            opt_fault_str = "FAULT" if opt_fault else "HIT"
-
-            row_values = [i + 1, page, lru_frames_str, lru_fault_str, opt_frames_str, opt_fault_str]
-
-            if lru_fault and opt_fault:
-                tag = "both_fault"
-            elif lru_fault:
-                tag = "lru_fault"
-            elif opt_fault:
-                tag = "opt_fault"
+        for i, page in enumerate(pages):
+            lf = lru_faults[i]
+            of = opt_faults[i]
+            if lf and of:
+                tag = 'both_fault'
+            elif lf:
+                tag = 'lru_fault'
+            elif of:
+                tag = 'opt_fault'
             else:
-                tag = "both_hit"
+                tag = 'both_hit'
 
-            self.step_tree.insert("", "end", values=row_values, tags=(tag,))
+            row = [
+                i+1, page,
+                str(lru_snaps[i]),
+                'FAULT' if lf else 'HIT',
+                str(opt_snaps[i]),
+                'FAULT' if of else 'HIT',
+            ]
+            tv.insert('', tk.END, values=row, tags=(tag,))
 
-        self.step_tree.tag_configure("both_fault", background="#7f1d1d", foreground="white")
-        self.step_tree.tag_configure("lru_fault", background="#78350f", foreground="white")
-        self.step_tree.tag_configure("opt_fault", background="#1e3a5f", foreground="white")
-        self.step_tree.tag_configure("both_hit", background="#14532d", foreground="white")
 
-    def _on_run_clicked(self):
-        """Handle Run Simulation button click."""
-        page_ref_str = self.page_ref_entry.get()
-        frames_str = self.frames_entry.get()
-
-        if not page_ref_str:
-            messagebox.showerror("Input Error", "Please enter a page reference string.")
-            return
-        
-        if not frames_str:
-            messagebox.showerror("Input Error", "Please enter the number of frames.")
-            return
-
-        pages = parse_page_reference(page_ref_str)
-        if pages is None or len(pages) == 0:
-            messagebox.showerror("Input Error", "Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).")
-            return
-
-        try:
-            num_frames = int(frames_str)
-            if num_frames <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Input Error", "Number of frames must be a positive integer (at least 1).")
-            return
-
-        if num_frames > 10:
-            messagebox.showwarning("Warning", "Large number of frames may affect visualization.")
-        
-        self.run_button.configure(state="disabled")
-        self._update_status_bar("Running simulation...")
-        
-        try:
-            algorithm_name = self.algorithm_dropdown.get()
-            algorithm_func = ALGORITHMS.get(algorithm_name, simulate_lru)
-            frames_snapshots, fault_flags, total_faults = algorithm_func(pages, num_frames)
-            self._display_results(pages, frames_snapshots, fault_flags, total_faults, num_frames)
-            self._update_status_bar(f"Simulation complete: {algorithm_name} algorithm with {total_faults} page faults")
-        except Exception as e:
-            messagebox.showerror("Error", f"Simulation failed: {str(e)}")
-            self._update_status_bar("Simulation failed")
-        finally:
-            self.run_button.configure(state="normal")
-
-    def _display_results(self, pages, frame_snapshots, fault_flags, total_faults, num_frames):
-        """Display simulation results in the Treeview table and update graph."""
-        self.table_placeholder.pack_forget()
-        self.table_inner.pack(fill="both", expand=True)
-        
-        for item in self.result_tree.get_children():
-            self.result_tree.delete(item)
-        
-        columns = ["Step", "Page"] + [f"Frame {i+1}" for i in range(num_frames)] + ["Fault?"]
-        self.result_tree["columns"] = columns
-        self.result_tree["show"] = "headings"
-        
-        for col in columns:
-            self.result_tree.heading(col, text=col)
-            self.result_tree.column(col, width=80, anchor="center")
-        
-        for i, (page, frames, is_fault) in enumerate(zip(pages, frame_snapshots, fault_flags)):
-            row_values = [i + 1, page] + frames + [""] * (num_frames - len(frames))
-            fault_text = "FAULT" if is_fault else "HIT"
-            row_values.append(fault_text)
-            
-            tag = "fault" if is_fault else "hit"
-            self.result_tree.insert("", "end", values=row_values, tags=(tag,))
-
-        total_steps = len(pages)
-        hits = total_steps - total_faults
-        hit_ratio = (hits / total_steps * 100) if total_steps > 0 else 0
-        
-        self.page_faults_label.configure(text=f"Faults: {total_faults}")
-        self.hit_ratio_label.configure(text=f"Hit: {hit_ratio:.1f}%")
-        
-        self.summary_label.configure(text=f"Total References: {total_steps}  |  Total Faults: {total_faults}  |  Hit Ratio: {hit_ratio:.1f}%")
-        
-        steps = list(range(1, total_steps + 1))
-        cumulative_faults = []
-        fault_count = 0
-        for is_fault in fault_flags:
-            if is_fault:
-                fault_count += 1
-            cumulative_faults.append(fault_count)
-        
-        self._update_graph(steps, cumulative_faults, fault_flags)
-        
-        self.root.update_idletasks()
-        if hasattr(self, 'scroll_canvas'):
-            self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
-
-    def _on_reset_paging(self):
-        """Reset the paging tab to initial state."""
-        self.page_ref_entry.entry.delete(0, tk.END)
-        self.page_ref_entry.entry.insert(0, self.page_ref_entry.placeholder)
-        self.page_ref_entry.entry.configure(fg=self.page_ref_entry.placeholder_color)
-        self.page_ref_entry._has_value = False
-        
-        self.frames_entry.entry.delete(0, tk.END)
-        self.frames_entry.entry.insert(0, self.frames_entry.placeholder)
-        self.frames_entry.entry.configure(fg=self.frames_entry.placeholder_color)
-        self.frames_entry._has_value = False
-        
-        self.algorithm_dropdown.dropdown.current(0)
-        
-        self.page_faults_label.configure(text="Faults: --")
-        self.hit_ratio_label.configure(text="Hit: --")
-        self.summary_label.configure(text="Total References: --  |  Total Faults: --  |  Hit Ratio: --")
-        
-        self.table_placeholder.pack(fill="both", expand=True)
-        self.table_inner.pack_forget()
-        
-        for item in self.result_tree.get_children():
-            self.result_tree.delete(item)
-        
-        self._update_graph([], [], [])
-        self._update_status_bar("Paging tab reset")
-
-    def _on_reset_comparison(self):
-        """Reset the comparison tab to initial state."""
-        self.comp_page_ref_entry.entry.delete(0, tk.END)
-        self.comp_page_ref_entry.entry.insert(0, self.comp_page_ref_entry.placeholder)
-        self.comp_page_ref_entry.entry.configure(fg=self.comp_page_ref_entry.placeholder_color)
-        self.comp_page_ref_entry._has_value = False
-        
-        self.comp_frames_entry.entry.delete(0, tk.END)
-        self.comp_frames_entry.entry.insert(0, self.comp_frames_entry.placeholder)
-        self.comp_frames_entry.entry.configure(fg=self.comp_frames_entry.placeholder_color)
-        self.comp_frames_entry._has_value = False
-        
-        for lbl in self.lru_summary_labels:
-            lbl.configure(text="--", fg=self.text_primary)
-        self.lru_summary_labels[0].configure(text="LRU", fg="#f97316")
-        
-        for lbl in self.optimal_summary_labels:
-            lbl.configure(text="--", fg=self.text_primary)
-        self.optimal_summary_labels[0].configure(text="Optimal", fg="#3b82f6")
-        
-        self._update_comparison_chart(0, 0)
-        self.analysis_label.configure(text="Run a comparison to see analysis", fg=self.text_secondary, bg="#1e293b")
-        
-        self.step_table_placeholder.pack(fill="both", expand=True)
-        self.step_table_inner.pack_forget()
-        
-        self._update_status_bar("Comparison tab reset")
-
-    def _create_fault_graph(self, parent):
-        """Create the embedded Matplotlib graph for page faults."""
-        graph_card = ModernCard(parent)
-        graph_card.grid(row=1, column=0, sticky="nsew", pady=(15, 0))
-
-        card_header = tk.Frame(graph_card, bg="#1e293b")
-        card_header.pack(fill="x", padx=20, pady=(15, 10))
-
-        tk.Label(
-            card_header,
-            text="Page Fault Graph",
-            font=("Inter", 14, "bold"),
-            bg="#1e293b",
-            fg=self.text_primary
-        ).pack(side="left")
-
-        self.fig = Figure(figsize=(8, 5), dpi=100, facecolor='#161b22')
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor('#161b22')
-        
-        plt.style.use('dark_background')
-        
-        self.ax.set_xlabel('Step Number', color='#9ca3af', fontsize=10)
-        self.ax.set_ylabel('Cumulative Page Faults', color='#9ca3af', fontsize=10)
-        self.ax.tick_params(colors='#9ca3af', labelsize=9)
-        
-        self.ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
-        self.ax.spines['bottom'].set_color('#4b5563')
-        self.ax.spines['left'].set_color('#4b5563')
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-        
-        self.fig.tight_layout(pad=2.0)
-
-        graph_inner = tk.Frame(graph_card, bg='#161b22')
-        graph_inner.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_inner)
-        self.canvas.get_tk_widget().configure(bg='#161b22')
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-
-        self._update_graph([], [], [])
-
-    def _update_graph(self, steps, cumulative_faults, fault_flags):
-        """Update the page fault graph with new data."""
-        self.ax.clear()
-        self.ax.set_facecolor('#161b22')
-        
-        self.ax.set_xlabel('Step Number', color='#9ca3af', fontsize=10)
-        self.ax.set_ylabel('Cumulative Page Faults', color='#9ca3af', fontsize=10)
-        self.ax.tick_params(colors='#9ca3af', labelsize=9)
-        
-        self.ax.grid(True, color='#2d3748', linestyle='--', linewidth=0.5, alpha=0.7)
-        self.ax.spines['bottom'].set_color('#4b5563')
-        self.ax.spines['left'].set_color('#4b5563')
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-        
-        if len(steps) > 0:
-            self.ax.step(steps, cumulative_faults, where='post', color='#3b82f6', linewidth=2, label='Cumulative Faults')
-            
-            fault_points = [(s, cf) for s, cf, is_fault in zip(steps, cumulative_faults, fault_flags) if is_fault]
-            if fault_points:
-                fx, fy = zip(*fault_points)
-                self.ax.scatter(fx, fy, color='#ef4444', s=60, zorder=5, label='Page Fault', edgecolors='white', linewidths=0.5)
-            
-            self.ax.legend(loc='upper left', fontsize=9, facecolor='#1e293b', edgecolor='#4b5563', labelcolor='#e5e7eb')
-            self.ax.set_xlim(0.5, max(steps) + 0.5)
-            self.ax.set_ylim(-0.2, max(cumulative_faults) + 0.5)
-        else:
-            self.ax.text(0.5, 0.5, 'Run a simulation to see the graph', 
-                        ha='center', va='center', transform=self.ax.transAxes,
-                        color='#64748b', fontsize=14, style='italic')
-            self.ax.set_xlim(0, 1)
-            self.ax.set_ylim(0, 1)
-            self.ax.axis('off')
-        self.fig.tight_layout(pad=2.0)
-        self.canvas.draw()
-
+# ─────────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────────
 
 def main():
-    """Main entry point for the application."""
     root = tk.Tk()
     app = VirtualMemoryApp(root)
     root.mainloop()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
