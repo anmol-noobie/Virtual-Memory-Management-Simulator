@@ -675,7 +675,7 @@
         <div class="header-content">
             <div class="logo">Virtual Memory Simulator</div>
             <div class="subtitle">Paging, Segmentation & Algorithm Comparison</div>
-            <div class="badge">v1.0</div>
+            <div class="badge">v1.2</div>
         </div>
     </header>
 
@@ -805,6 +805,15 @@
                             <div class="input-group" style="margin-top: 12px;">
                                 <label>Total Memory (KB)</label>
                                 <input type="number" id="totalMem" placeholder="512" value="512" min="1">
+                            </div>
+
+                            <!-- ── NEW: Pre-occupied (initial) blocks ── -->
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Initial Occupied Blocks <span style="text-transform:none;color:#6e7681;font-weight:400;">(optional)</span></label>
+                                <input type="text" id="initialBlocks" placeholder="e.g. 100-200, 350-450">
+                                <div style="font-size:11px;color:#6e7681;margin-top:4px;line-height:1.4;">
+                                    Comma-separated <code>start-end</code> ranges in KB. These regions are marked as already in use BEFORE allocation, creating multiple free holes so First/Best/Worst Fit produce visibly different results. Leave empty for a single empty memory.
+                                </div>
                             </div>
 
                             <!-- ── NEW: Fit Strategy dropdown ── -->
@@ -1296,31 +1305,95 @@
         }
 
         /**
-         * simulateSegmentation(segmentList, totalMemory, strategy)
+         * parseInitialBlocks(text, totalMemory)
          *
-         * NEW: supports First Fit, Best Fit, and Worst Fit.
-         *
-         * The free list starts as one hole spanning [0, totalMemory).
-         * Each segment is allocated from the appropriate hole according
-         * to the chosen strategy; the hole is then split.
-         *
-         * Returns: array of allocation objects (same shape as before).
+         * Accepts strings like "100-200, 350-450" and returns a list of
+         * {name, base, size, end, status:'Pre-allocated', holeSize:null}.
+         * Throws on invalid syntax / overlap / out-of-range input.
          */
-        function simulateSegmentation(segmentList, totalMemory, strategy = 'first') {
-            // Free list: array of {start, size} objects
-            let freeList = [{ start: 0, size: totalMemory }];
-            const allocations = [];
+        function parseInitialBlocks(text, totalMemory) {
+            if (!text || !text.trim()) return [];
+            const parts = text.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+            const blocks = [];
+            for (let i = 0; i < parts.length; i++) {
+                const m = parts[i].match(/^(\d+)\s*-\s*(\d+)$/);
+                if (!m) {
+                    throw new Error(`Initial block "${parts[i]}" is not in the form start-end (e.g. 100-200).`);
+                }
+                const start = parseInt(m[1], 10);
+                const end   = parseInt(m[2], 10);
+                if (end <= start) {
+                    throw new Error(`Initial block "${parts[i]}" must have end > start.`);
+                }
+                if (start < 0 || end > totalMemory) {
+                    throw new Error(`Initial block "${parts[i]}" is outside 0..${totalMemory}.`);
+                }
+                blocks.push({
+                    name: `P${i + 1}`,
+                    base: start,
+                    size: end - start,
+                    end,
+                    status: 'Pre-allocated',
+                    holeSize: null
+                });
+            }
+            blocks.sort((a, b) => a.base - b.base);
+            for (let i = 1; i < blocks.length; i++) {
+                if (blocks[i].base < blocks[i - 1].end) {
+                    throw new Error(`Initial blocks overlap: ${blocks[i-1].base}-${blocks[i-1].end} and ${blocks[i].base}-${blocks[i].end}.`);
+                }
+            }
+            return blocks;
+        }
+
+        /**
+         * buildFreeListFromOccupied(occupiedBlocks, totalMemory)
+         *
+         * Given a sorted list of pre-allocated blocks, returns the free-list
+         * (sorted by start) representing the holes between them.
+         */
+        function buildFreeListFromOccupied(occupiedBlocks, totalMemory) {
+            const free = [];
+            let cursor = 0;
+            for (const b of occupiedBlocks) {
+                if (b.base > cursor) {
+                    free.push({ start: cursor, size: b.base - cursor });
+                }
+                cursor = b.end;
+            }
+            if (cursor < totalMemory) {
+                free.push({ start: cursor, size: totalMemory - cursor });
+            }
+            return free;
+        }
+
+        /**
+         * simulateSegmentation(segmentList, totalMemory, strategy, occupiedBlocks)
+         *
+         * Supports First Fit, Best Fit, and Worst Fit.
+         *
+         * If occupiedBlocks is non-empty the initial free list is built around
+         * those pre-allocated regions, which means there are MULTIPLE holes
+         * from the start — this is what makes the three strategies produce
+         * visibly different placements.
+         *
+         * Returns: array of allocation objects (with pre-allocated entries
+         * appearing first), plus _freeList attached.
+         */
+        function simulateSegmentation(segmentList, totalMemory, strategy = 'first', occupiedBlocks = []) {
+            // Build the initial free list from the pre-occupied regions
+            let freeList = buildFreeListFromOccupied(occupiedBlocks, totalMemory);
+
+            // Pre-allocated blocks appear first in the result (so the table
+            // and the visualization can show the starting state too).
+            const allocations = occupiedBlocks.map(b => ({ ...b }));
 
             for (const seg of segmentList) {
-                // Find candidate holes that are large enough
                 const candidates = freeList
                     .map((hole, idx) => ({ ...hole, idx }))
                     .filter(h => h.size >= seg.size);
 
-                let chosen = null;
-
                 if (candidates.length === 0) {
-                    // No hole fits — allocation fails
                     allocations.push({
                         name: seg.name,
                         size: seg.size,
@@ -1332,15 +1405,22 @@
                     continue;
                 }
 
+                let chosen;
                 if (strategy === 'first') {
-                    // First candidate in free-list order (lowest start address)
+                    // Lowest start address
                     chosen = candidates.reduce((a, b) => a.start < b.start ? a : b);
                 } else if (strategy === 'best') {
-                    // Smallest hole that fits
-                    chosen = candidates.reduce((a, b) => a.size < b.size ? a : b);
+                    // Smallest hole that fits (ties → lower address)
+                    chosen = candidates.reduce((a, b) => {
+                        if (a.size !== b.size) return a.size < b.size ? a : b;
+                        return a.start < b.start ? a : b;
+                    });
                 } else {
-                    // Worst fit — largest hole
-                    chosen = candidates.reduce((a, b) => a.size > b.size ? a : b);
+                    // Worst fit — largest hole (ties → lower address)
+                    chosen = candidates.reduce((a, b) => {
+                        if (a.size !== b.size) return a.size > b.size ? a : b;
+                        return a.start < b.start ? a : b;
+                    });
                 }
 
                 const base = chosen.start;
@@ -1350,7 +1430,7 @@
                     base,
                     end: base + seg.size,
                     status: 'Allocated',
-                    holeSize: chosen.size    // stored so the table can show it
+                    holeSize: chosen.size
                 });
 
                 // Split the chosen hole
@@ -1362,7 +1442,6 @@
                 }
             }
 
-            // Attach final free list snapshot for Compact to use
             allocations._freeList = freeList;
             return allocations;
         }
@@ -1421,6 +1500,7 @@
             segments = [];
             lastAllocationResult = null;
             updateSegmentList();
+            document.getElementById('initialBlocks').value = '';
             document.getElementById('segResultsTable').innerHTML = '<div class="empty-state">Run segmentation to see results</div>';
             document.getElementById('segStatus').textContent = 'Add segments and run';
             document.getElementById('segUsed').textContent = '-- KB';
@@ -1440,6 +1520,16 @@
             if (!totalMem || totalMem < 1) { alert('Total memory must be a positive integer.'); return; }
 
             const strategy = document.getElementById('fitStrategy').value;
+            const initialBlocksRaw = document.getElementById('initialBlocks').value;
+
+            let occupied;
+            try {
+                occupied = parseInitialBlocks(initialBlocksRaw, totalMem);
+            } catch (e) {
+                alert(e.message);
+                updateStatus('Invalid initial blocks');
+                return;
+            }
 
             const runBtn = document.querySelector('#segmentation .btn-secondary');
             runBtn.disabled = true;
@@ -1447,12 +1537,12 @@
 
             setTimeout(() => {
                 try {
-                    const allocations = simulateSegmentation(segments, totalMem, strategy);
-                    lastAllocationResult = { allocations, totalMem, strategy };
+                    const allocations = simulateSegmentation(segments, totalMem, strategy, occupied);
+                    lastAllocationResult = { allocations, totalMem, strategy, occupied };
 
                     displaySegResults(allocations, totalMem, strategy);
 
-                    // Enable Compact only when there is at least one allocated segment
+                    // Enable Compact only when there is at least one user-allocated segment
                     const hasAllocated = allocations.some(a => a.status === 'Allocated');
                     document.getElementById('compactBtn').disabled = !hasAllocated;
 
@@ -1460,7 +1550,11 @@
                     document.getElementById('compactDiff').classList.remove('visible');
 
                     const failedCount = allocations.filter(a => a.status === 'Failed').length;
-                    updateStatus(`Segmentation (${strategy} fit) complete: ${allocations.length} segments, ${failedCount} failed`);
+                    const preCount = occupied.length;
+                    updateStatus(
+                        `Segmentation (${strategy} fit) complete: ${segments.length} requested, ${failedCount} failed`
+                        + (preCount ? `, ${preCount} pre-allocated block(s)` : '')
+                    );
                 } catch (e) {
                     alert('Segmentation failed: ' + e.message);
                     updateStatus('Segmentation failed');
@@ -1471,10 +1565,12 @@
         }
 
         // ─── Display segmentation results ──────────────────────────────────────────
-        // Now shows strategy + hole size column in the table
+        // Pre-allocated blocks count as used memory but are shown as a
+        // separate, dimmer row in the table.
         function displaySegResults(allocations, totalMemory, strategy) {
-            const usedMem = allocations.filter(a => a.status === 'Allocated').reduce((s, a) => s + a.size, 0);
-            const freeMem = totalMemory - usedMem;
+            const occupied = allocations.filter(a => a.status === 'Allocated' || a.status === 'Pre-allocated');
+            const usedMem  = occupied.reduce((s, a) => s + a.size, 0);
+            const freeMem  = totalMemory - usedMem;
             const failedCount = allocations.filter(a => a.status === 'Failed').length;
 
             document.getElementById('segUsed').textContent = `${usedMem} KB`;
@@ -1497,14 +1593,19 @@
                 </tr></thead><tbody>`;
 
             for (const alloc of allocations) {
-                const rowClass = alloc.status === 'Allocated' ? 'allocated-row' : 'failed-row';
+                let rowClass;
+                if (alloc.status === 'Allocated')        rowClass = 'allocated-row';
+                else if (alloc.status === 'Pre-allocated') rowClass = '';
+                else                                       rowClass = 'failed-row';
+
+                const stratCell = alloc.status === 'Pre-allocated' ? '—' : strategyLabel;
                 tableHTML += `<tr class="${rowClass}">
                     <td>${alloc.name}</td>
                     <td>${alloc.base}</td>
                     <td>${alloc.size}</td>
                     <td>${alloc.end}</td>
-                    <td>${alloc.holeSize !== null ? alloc.holeSize : '—'}</td>
-                    <td style="color:#8b949e;font-size:11px;">${strategyLabel}</td>
+                    <td>${alloc.holeSize !== null && alloc.holeSize !== undefined ? alloc.holeSize : '—'}</td>
+                    <td style="color:#8b949e;font-size:11px;">${stratCell}</td>
                     <td><strong>${alloc.status}</strong></td>
                 </tr>`;
             }
@@ -1514,7 +1615,11 @@
             drawMemoryDiagram(allocations, totalMemory);
         }
 
-        // ─── Draw memory diagram (unchanged logic) ─────────────────────────────────
+        // ─── Draw memory diagram (FIXED: uses real base addresses) ─────────────────
+        // Walks the address space from 0 to totalMemory in order, drawing each
+        // allocated/pre-allocated block at its actual base address and filling
+        // the gaps in between with FREE blocks. This way Best/Worst Fit are
+        // visibly different from First Fit.
         function drawMemoryDiagram(allocations, totalMemory = 512) {
             const canvas = document.getElementById('memoryCanvas');
             const ctx = canvas.getContext('2d');
@@ -1522,34 +1627,61 @@
             ctx.clearRect(0, 0, width, height);
 
             const colors = ['#238636','#1f6feb','#a371f7','#d29922','#f85149','#06b6d4','#ec4899'];
+            const PRE_COLOUR = '#475569';   // distinct dim grey-blue for pre-allocated
+            const FREE_COLOUR = '#30363d';
             const barWidth = width - 2 * padding, barHeight = height - 2 * padding;
-            let currentX = 0, colorIdx = 0;
 
             ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
             ctx.strokeRect(padding, padding, barWidth, barHeight);
 
-            for (const alloc of allocations) {
-                if (alloc.status === 'Allocated') {
-                    const segWidth = (alloc.size / totalMemory) * barWidth;
-                    ctx.fillStyle = colors[colorIdx % colors.length];
-                    ctx.fillRect(padding + currentX, padding, segWidth - 1, barHeight);
+            // Only blocks with a real numeric base sit in the address space.
+            const placed = allocations
+                .filter(a => (a.status === 'Allocated' || a.status === 'Pre-allocated') && typeof a.base === 'number')
+                .slice()
+                .sort((a, b) => a.base - b.base);
+
+            const xOf = addr => padding + (addr / totalMemory) * barWidth;
+
+            const drawBlock = (start, size, fill, label) => {
+                const x = xOf(start);
+                const w = (size / totalMemory) * barWidth;
+                ctx.fillStyle = fill;
+                ctx.fillRect(x, padding, Math.max(w - 1, 1), barHeight);
+                if (label) {
                     ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Inter';
                     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                    const label = segWidth > 50 ? `${alloc.name} (${alloc.size})` : alloc.name;
-                    ctx.fillText(label, padding + currentX + segWidth / 2, padding + barHeight / 2);
-                    currentX += segWidth;
+                    const text = w > 60 ? label : label.split(' ')[0];
+                    ctx.fillText(text, x + w / 2, padding + barHeight / 2);
+                }
+            };
+
+            const drawFree = (start, size) => {
+                const x = xOf(start);
+                const w = (size / totalMemory) * barWidth;
+                ctx.fillStyle = FREE_COLOUR;
+                ctx.fillRect(x, padding, Math.max(w - 1, 1), barHeight);
+                ctx.fillStyle = '#8b949e';
+                ctx.font = 'italic 11px Inter';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                if (w > 50) ctx.fillText(`FREE (${size} KB)`, x + w / 2, padding + barHeight / 2);
+            };
+
+            let cursor = 0;
+            let colorIdx = 0;
+            for (const a of placed) {
+                if (a.base > cursor) {
+                    drawFree(cursor, a.base - cursor);
+                }
+                if (a.status === 'Pre-allocated') {
+                    drawBlock(a.base, a.size, PRE_COLOUR, `${a.name} (${a.size})`);
+                } else {
+                    drawBlock(a.base, a.size, colors[colorIdx % colors.length], `${a.name} (${a.size})`);
                     colorIdx++;
                 }
+                cursor = a.end;
             }
-
-            if (currentX < barWidth) {
-                const freeWidth = barWidth - currentX;
-                ctx.fillStyle = '#30363d';
-                ctx.fillRect(padding + currentX, padding, freeWidth - 1, barHeight);
-                ctx.fillStyle = '#8b949e'; ctx.font = 'italic 11px Inter';
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText(`FREE (${Math.round(freeWidth / barWidth * totalMemory)} KB)`,
-                    padding + currentX + freeWidth / 2, padding + barHeight / 2);
+            if (cursor < totalMemory) {
+                drawFree(cursor, totalMemory - cursor);
             }
 
             ctx.fillStyle = '#8b949e'; ctx.font = '10px JetBrains Mono';
@@ -1574,9 +1706,11 @@
             const { allocations, totalMem } = lastAllocationResult;
 
             // ── 1. Analyse state BEFORE compaction ─────────────────────────────
-            const allocated = allocations.filter(a => a.status === 'Allocated');
-            const usedMem   = allocated.reduce((s, a) => s + a.size, 0);
-            const freeMem   = totalMem - usedMem;
+            // Both pre-allocated and dynamically allocated blocks count as "in use".
+            const occupied = allocations.filter(
+                a => a.status === 'Allocated' || a.status === 'Pre-allocated');
+            const usedMem  = occupied.reduce((s, a) => s + a.size, 0);
+            const freeMem  = totalMem - usedMem;
 
             // Build the actual free-list from the previous simulation result
             const freeList = allocations._freeList || [];
@@ -1584,14 +1718,19 @@
 
             // After compaction all free space merges into one contiguous block
             const contiguousAfter = freeMem;
-            const gained = contiguousAfter - largestBefore; // extra usable space gained
+            const gained = contiguousAfter - largestBefore;
 
             // ── 2. Redraw memory bar showing compacted layout ───────────────────
-            // Compact = allocated segments contiguous from address 0, free hole at end
-            const compactedAllocs = allocated.map((a, i, arr) => {
-                const base = arr.slice(0, i).reduce((s, x) => s + x.size, 0);
-                return { ...a, base, end: base + a.size };
-            });
+            // Compact = every occupied block packed contiguously from address 0,
+            // sorted by current base so addresses stay in their original order,
+            // free hole merged at the end.
+            const compactedAllocs = occupied
+                .slice()
+                .sort((a, b) => a.base - b.base)
+                .map((a, i, arr) => {
+                    const base = arr.slice(0, i).reduce((s, x) => s + x.size, 0);
+                    return { ...a, base, end: base + a.size };
+                });
             drawMemoryDiagram(compactedAllocs, totalMem);
 
             // ── 3. Show the diff panel ──────────────────────────────────────────
