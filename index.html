@@ -234,6 +234,22 @@
             background: #f85149;
         }
 
+        /* ── NEW: Compact button style ── */
+        .btn-compact {
+            background: #1f6feb;
+            color: white;
+        }
+
+        .btn-compact:hover {
+            background: #388bfd;
+        }
+
+        .btn-compact:disabled {
+            background: #21262d;
+            color: #484f58;
+            cursor: not-allowed;
+        }
+
         .stats-row {
             display: flex;
             gap: 12px;
@@ -375,6 +391,7 @@
         .segment-item {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             padding: 8px 12px;
             border-bottom: 1px solid #21262d;
             font-size: 13px;
@@ -392,6 +409,19 @@
             color: #8b949e;
             font-family: 'JetBrains Mono', monospace;
         }
+
+        /* ── NEW: delete-segment button ── */
+        .seg-delete-btn {
+            background: transparent;
+            border: none;
+            color: #6e7681;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 0 4px;
+            line-height: 1;
+            transition: color 0.15s;
+        }
+        .seg-delete-btn:hover { color: #f85149; }
 
         .empty-state {
             text-align: center;
@@ -516,6 +546,109 @@
             flex: 1;
         }
 
+        /* ── NEW: Compaction diff panel ── */
+        .compact-diff {
+            display: none;
+            margin-top: 16px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .compact-diff.visible {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .compact-diff-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .compact-diff-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .compact-label {
+            font-size: 11px;
+            color: #8b949e;
+            margin-bottom: 2px;
+        }
+
+        .compact-bar-wrap {
+            position: relative;
+            height: 36px;
+        }
+
+        .compact-bar-fill {
+            position: absolute;
+            top: 0; left: 0; height: 100%;
+            border-radius: 4px;
+            transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .compact-bar-bg {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #21262d;
+            border-radius: 4px;
+        }
+
+        .compact-stat-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .compact-stat {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 14px;
+            flex: 1;
+            min-width: 100px;
+        }
+
+        .compact-stat-label {
+            font-size: 10px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .compact-stat-value {
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: #3fb950;
+            margin-top: 2px;
+        }
+
+        /* ── NEW: fit-info badge under dropdown ── */
+        .fit-info {
+            font-size: 11px;
+            color: #6e7681;
+            margin-top: 4px;
+            line-height: 1.4;
+            min-height: 32px;
+        }
+
         @media (max-width: 768px) {
             .grid-2, .grid-3 {
                 grid-template-columns: 1fr;
@@ -553,7 +686,7 @@
             <button class="tab" data-tab="comparison">LRU vs Optimal Comparison</button>
         </div>
 
-        <!-- Tab 1: Paging -->
+        <!-- Tab 1: Paging (unchanged) -->
         <div id="paging" class="tab-content active">
             <div class="grid grid-2">
                 <div>
@@ -642,7 +775,14 @@
             </div>
         </div>
 
-        <!-- Tab 2: Segmentation -->
+        <!-- ═══════════════════════════════════════════════════════════
+             Tab 2: Segmentation  ← MODIFIED
+             Changes:
+               1. Added "Fit Strategy" dropdown with First / Best / Worst Fit
+               2. Added fit-info hint text under the dropdown
+               3. Added "Compact Memory" button (disabled until simulation runs)
+               4. Compact diff panel (before/after visualisation) below memory bar
+             ═══════════════════════════════════════════════════════════ -->
         <div id="segmentation" class="tab-content">
             <div class="grid grid-2">
                 <div>
@@ -666,10 +806,34 @@
                                 <label>Total Memory (KB)</label>
                                 <input type="number" id="totalMem" placeholder="512" value="512" min="1">
                             </div>
+
+                            <!-- ── NEW: Fit Strategy dropdown ── -->
+                            <div class="input-group" style="margin-top: 12px;">
+                                <label>Fit Strategy</label>
+                                <select id="fitStrategy" onchange="updateFitInfo()">
+                                    <option value="first">First Fit</option>
+                                    <option value="best">Best Fit</option>
+                                    <option value="worst">Worst Fit</option>
+                                </select>
+                                <div class="fit-info" id="fitInfo">
+                                    Scans from the start and uses the <strong>first free hole</strong> that is large enough. Fast, but can leave awkward fragments at the front.
+                                </div>
+                            </div>
+
                             <div class="btn-group" style="margin-top: 16px;">
                                 <button class="btn btn-primary" onclick="addSegment()">Add Segment</button>
                                 <button class="btn btn-secondary" onclick="runSegmentation()">Run</button>
                                 <button class="btn btn-danger" onclick="clearSegments()">Clear</button>
+                            </div>
+
+                            <!-- ── NEW: Compact Memory button ── -->
+                            <button class="btn btn-compact" id="compactBtn"
+                                    style="margin-top: 10px; width: 100%;"
+                                    onclick="compactMemory()" disabled>
+                                ⚡ Compact Memory
+                            </button>
+                            <div style="margin-top: 6px; font-size: 11px; color: #6e7681; line-height: 1.4;">
+                                <strong>Compaction</strong> slides all allocated segments together, merging scattered free holes into one large contiguous block.
                             </div>
                         </div>
                     </div>
@@ -735,11 +899,49 @@
                     <div class="memory-diagram">
                         <canvas id="memoryCanvas" width="800" height="100"></canvas>
                     </div>
+
+                    <!-- ── NEW: Before/After compaction diff panel ── -->
+                    <div class="compact-diff" id="compactDiff">
+                        <div class="compact-diff-title">Compaction — Before vs After</div>
+                        <div class="compact-diff-row">
+                            <div>
+                                <div class="compact-label">Before compaction</div>
+                                <div class="compact-bar-wrap">
+                                    <div class="compact-bar-bg"></div>
+                                    <div class="compact-bar-fill" id="beforeBar" style="background:#da3633;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="compact-label">After compaction (one contiguous free block)</div>
+                                <div class="compact-bar-wrap">
+                                    <div class="compact-bar-bg"></div>
+                                    <div class="compact-bar-fill" id="afterBar" style="background:#238636;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="compact-stat-row">
+                            <div class="compact-stat">
+                                <div class="compact-stat-label">Largest Free Block Before</div>
+                                <div class="compact-stat-value" id="cStatBefore">-- KB</div>
+                            </div>
+                            <div class="compact-stat">
+                                <div class="compact-stat-label">Contiguous Free After</div>
+                                <div class="compact-stat-value" id="cStatAfter">-- KB</div>
+                            </div>
+                            <div class="compact-stat">
+                                <div class="compact-stat-label">Fragmentation Eliminated</div>
+                                <div class="compact-stat-value" id="cStatGain">-- KB</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 11px; color: #6e7681; line-height: 1.5;">
+                            <strong>Note:</strong> Compaction is expensive — the OS must copy every byte of allocated memory. Addresses in every segment's base register must also be updated. Modern systems avoid it by using paging instead.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Tab 3: Comparison -->
+        <!-- Tab 3: Comparison (unchanged) -->
         <div id="comparison" class="tab-content">
             <div class="panel">
                 <div class="panel-header">
@@ -840,16 +1042,17 @@
     </div>
 
     <script>
-        // Global state
+        // ─── Global state ──────────────────────────────────────────────────────────
         let segments = [];
+        let lastAllocationResult = null;   // NEW: stored so Compact can reference it
         let simulationRunning = false;
 
-        // Status bar update
+        // ─── Status bar ────────────────────────────────────────────────────────────
         function updateStatus(message) {
             document.getElementById('statusText').textContent = message;
         }
 
-        // Tab switching
+        // ─── Tab switching ─────────────────────────────────────────────────────────
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -859,104 +1062,46 @@
             });
         });
 
-        // Parse page reference string
+        // ─── Parse page reference string ───────────────────────────────────────────
         function parsePageRef(str) {
             const nums = str.trim().split(/[\s,]+/).map(s => parseInt(s)).filter(n => !isNaN(n));
             return nums.length > 0 ? nums : null;
         }
 
-        // LRU Algorithm
+        // ─── LRU Algorithm ─────────────────────────────────────────────────────────
         function simulateLRU(pages, numFrames) {
             const frames = [];
             const frameSnapshots = [];
             const faultFlags = [];
             let totalFaults = 0;
-            // recentUse stores pages in order of least recently used (index 0) to most recently used (last)
             const recentUse = [];
 
             for (const page of pages) {
                 const idx = frames.indexOf(page);
-                
                 if (idx !== -1) {
-                    // PAGE HIT: page is already in frames
                     faultFlags.push(false);
-                    // Remove page from its current position in recentUse
                     const useIdx = recentUse.indexOf(page);
-                    if (useIdx !== -1) {
-                        recentUse.splice(useIdx, 1);
-                    }
-                    // Add to end (most recently used)
+                    if (useIdx !== -1) recentUse.splice(useIdx, 1);
                     recentUse.push(page);
                 } else {
-                    // PAGE FAULT: page not in frames
                     totalFaults++;
                     faultFlags.push(true);
-                    
                     if (frames.length < numFrames) {
-                        // Frames not full - just add the page
                         frames.push(page);
                         recentUse.push(page);
                     } else {
-                        // Frames full - evict LRU page (first in recentUse)
                         const lruPage = recentUse.shift();
                         const replaceIdx = frames.indexOf(lruPage);
-                        if (replaceIdx !== -1) {
-                            frames[replaceIdx] = page;
-                        }
+                        if (replaceIdx !== -1) frames[replaceIdx] = page;
                         recentUse.push(page);
                     }
                 }
                 frameSnapshots.push([...frames]);
             }
-
             return { frameSnapshots, faultFlags, totalFaults };
         }
-        
-        // Test LRU to verify correctness with user's example
-        function testLRU() {
-            const pages = [7, 0, 1, 2, 3, 1, 2, 3, 2, 1];
-            const numFrames = 3;
-            const result = simulateLRU(pages, numFrames);
-            
-            const expectedSnapshots = [[7], [7,0], [7,0,1], [2,0,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1], [2,3,1]];
-            const expectedFaults = [true, true, true, true, true, false, false, false, false, false];
-            
-            let allMatch = true;
-            let output = "LRU Test: pages=[7,0,1,2,3,1,2,3,2,1], frames=3\n\n";
-            
-            for (let i = 0; i < pages.length; i++) {
-                const snapMatch = JSON.stringify(result.frameSnapshots[i]) === JSON.stringify(expectedSnapshots[i]);
-                const faultMatch = result.faultFlags[i] === expectedFaults[i];
-                
-                output += `Step ${i+1}: Page=${pages[i]}, `;
-                output += `Frames=[${result.frameSnapshots[i].join(',')}], `;
-                output += `Fault=${result.faultFlags[i] ? 'FAULT' : 'HIT'}`;
-                if (snapMatch && faultMatch) {
-                    output += " ✓\n";
-                } else {
-                    output += ` ✗ (expected [${expectedSnapshots[i].join(',')}])\n`;
-                    allMatch = false;
-                }
-            }
-            
-            output += `\nTotal Faults: ${result.totalFaults} (expected: 5)\n`;
-            
-            if (allMatch && result.totalFaults === 5) {
-                output += "\n✓ LRU algorithm is CORRECT!";
-                alert("LRU Test PASSED!\n\n" + output);
-            } else {
-                output += "\n✗ LRU algorithm has issues";
-                alert("LRU Test FAILED!\n\n" + output);
-            }
-            
-            console.log(output);
-            return allMatch;
-        }
-        
-        // Run test automatically on load
-        // testLRU();
 
-        // Optimal Algorithm
+        // ─── Optimal Algorithm ─────────────────────────────────────────────────────
         function simulateOptimal(pages, numFrames) {
             const frames = [];
             const frameSnapshots = [];
@@ -979,63 +1124,45 @@
                         for (let j = 0; j < frames.length; j++) {
                             const futureUse = pages.slice(i + 1).indexOf(frames[j]);
                             const dist = futureUse === -1 ? Infinity : futureUse;
-                            if (dist > maxDist) {
-                                maxDist = dist;
-                                replaceIdx = j;
-                            }
+                            if (dist > maxDist) { maxDist = dist; replaceIdx = j; }
                         }
                         frames[replaceIdx] = page;
                     }
                 }
                 frameSnapshots.push([...frames]);
             }
-
             return { frameSnapshots, faultFlags, totalFaults };
         }
 
-        // Run paging simulation
+        // ─── Paging simulation runner ──────────────────────────────────────────────
         function runSimulation() {
             const pageRef = document.getElementById('pageRef').value.trim();
             const numFrames = parseInt(document.getElementById('numFrames').value);
             const algorithm = document.getElementById('algorithm').value;
 
-            if (!pageRef) {
-                alert('Input Error: Please enter a page reference string.');
-                return;
-            }
-
+            if (!pageRef) { alert('Please enter a page reference string.'); return; }
             const pages = parsePageRef(pageRef);
-            if (!pages || pages.length === 0) {
-                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
-                return;
-            }
-
-            if (!numFrames || numFrames < 1) {
-                alert('Input Error: Number of frames must be a positive integer (at least 1).');
-                return;
-            }
+            if (!pages || pages.length === 0) { alert('Invalid page reference string.'); return; }
+            if (!numFrames || numFrames < 1) { alert('Number of frames must be a positive integer.'); return; }
 
             const runBtn = document.querySelector('#paging .btn-primary');
-            runBtn.disabled = true;
-            runBtn.textContent = 'Running...';
+            runBtn.disabled = true; runBtn.textContent = 'Running...';
             updateStatus('Running simulation...');
 
             setTimeout(() => {
                 try {
                     const result = algorithm === 'lru' ? simulateLRU(pages, numFrames) : simulateOptimal(pages, numFrames);
                     displayResults(pages, result, numFrames);
-                    updateStatus(`Simulation complete: ${algorithm.toUpperCase()} algorithm with ${result.totalFaults} page faults`);
+                    updateStatus(`Simulation complete: ${algorithm.toUpperCase()} with ${result.totalFaults} page faults`);
                 } catch (e) {
-                    alert('Error: Simulation failed - ' + e.message);
+                    alert('Simulation failed: ' + e.message);
                     updateStatus('Simulation failed');
                 } finally {
-                    runBtn.disabled = false;
-                    runBtn.textContent = 'Run Simulation';
+                    runBtn.disabled = false; runBtn.textContent = 'Run Simulation';
                 }
             }, 50);
         }
 
-        // Reset paging tab
         function resetPaging() {
             document.getElementById('pageRef').value = '';
             document.getElementById('numFrames').value = '';
@@ -1046,58 +1173,40 @@
             updateStatus('Paging tab reset');
         }
 
-        // Display paging results
         function displayResults(pages, result, numFrames) {
             const { frameSnapshots, faultFlags, totalFaults } = result;
-            
             document.getElementById('pagingStats').style.display = 'block';
             document.getElementById('faultCount').textContent = totalFaults;
-            
             const hits = pages.length - totalFaults;
-            const hitRatio = ((hits / pages.length) * 100).toFixed(1);
-            document.getElementById('hitRatio').textContent = hitRatio + '%';
+            document.getElementById('hitRatio').textContent = ((hits / pages.length) * 100).toFixed(1) + '%';
             document.getElementById('totalRefs').textContent = pages.length;
 
-            let tableHTML = `<table>
-                <thead><tr><th>Step</th><th>Page</th>`;
-            for (let i = 1; i <= numFrames; i++) {
-                tableHTML += `<th>Frame ${i}</th>`;
-            }
+            let tableHTML = `<table><thead><tr><th>Step</th><th>Page</th>`;
+            for (let i = 1; i <= numFrames; i++) tableHTML += `<th>Frame ${i}</th>`;
             tableHTML += `<th>Fault?</th></tr></thead><tbody>`;
-
             for (let i = 0; i < pages.length; i++) {
                 const rowClass = faultFlags[i] ? 'fault-row' : 'hit-row';
-                const faultText = faultFlags[i] ? 'FAULT' : 'HIT';
-                tableHTML += `<tr class="${rowClass}">
-                    <td>${i + 1}</td>
-                    <td>${pages[i]}</td>`;
-                for (let j = 0; j < numFrames; j++) {
+                tableHTML += `<tr class="${rowClass}"><td>${i+1}</td><td>${pages[i]}</td>`;
+                for (let j = 0; j < numFrames; j++)
                     tableHTML += `<td>${frameSnapshots[i][j] !== undefined ? frameSnapshots[i][j] : '-'}</td>`;
-                }
-                tableHTML += `<td><strong>${faultText}</strong></td></tr>`;
+                tableHTML += `<td><strong>${faultFlags[i] ? 'FAULT' : 'HIT'}</strong></td></tr>`;
             }
             tableHTML += '</tbody></table>';
             document.getElementById('resultsTable').innerHTML = tableHTML;
-
             drawFaultChart(pages, faultFlags);
         }
 
-        // Draw fault graph
+        // ─── Draw fault graph (unchanged) ──────────────────────────────────────────
         function drawFaultChart(pages, faultFlags) {
             const canvas = document.getElementById('faultChart');
             const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = canvas.width, height = canvas.height;
             const padding = { top: 30, right: 40, bottom: 50, left: 60 };
-
             ctx.clearRect(0, 0, width, height);
 
             const cumulative = [];
             let count = 0;
-            for (const f of faultFlags) {
-                if (f) count++;
-                cumulative.push(count);
-            }
+            for (const f of faultFlags) { if (f) count++; cumulative.push(count); }
 
             const maxY = Math.max(...cumulative, 1) + 1;
             const chartWidth = width - padding.left - padding.right;
@@ -1105,147 +1214,174 @@
             const xStep = chartWidth / (pages.length - 1 || 1);
             const yScale = chartHeight / maxY;
 
-            // Draw subtle background grid
-            ctx.strokeStyle = '#21262d';
-            ctx.lineWidth = 0.5;
+            ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5;
             for (let i = 0; i <= maxY; i++) {
                 const y = padding.top + chartHeight - i * yScale;
-                ctx.beginPath();
-                ctx.moveTo(padding.left, y);
-                ctx.lineTo(width - padding.right, y);
-                ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(width - padding.right, y); ctx.stroke();
             }
             for (let i = 0; i < pages.length; i++) {
                 const x = padding.left + i * xStep;
-                ctx.beginPath();
-                ctx.moveTo(x, padding.top);
-                ctx.lineTo(x, padding.top + chartHeight);
-                ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + chartHeight); ctx.stroke();
             }
 
-            // Y-axis labels
-            ctx.fillStyle = '#8b949e';
-            ctx.font = '11px Inter';
-            ctx.textAlign = 'right';
-            for (let i = 0; i <= maxY; i++) {
-                const y = padding.top + chartHeight - i * yScale;
-                ctx.fillText(i, padding.left - 10, y + 4);
-            }
+            ctx.fillStyle = '#8b949e'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
+            for (let i = 0; i <= maxY; i++) ctx.fillText(i, padding.left - 10, padding.top + chartHeight - i * yScale + 4);
 
-            // X-axis labels
             ctx.textAlign = 'center';
-            const labelInterval = pages.length > 20 ? 5 : (pages.length > 10 ? 2 : 1);
-            for (let i = 0; i < pages.length; i += labelInterval) {
-                const x = padding.left + i * xStep;
-                ctx.fillText(i + 1, x, height - padding.bottom + 20);
-            }
-            ctx.fillStyle = '#6e7681';
-            ctx.font = '10px Inter';
-            ctx.fillText('1', padding.left, height - padding.bottom + 20);
-            if (pages.length > 1) {
-                ctx.fillText(pages.length, width - padding.right, height - padding.bottom + 20);
-            }
+            for (let i = 0; i < pages.length; i += pages.length > 20 ? 5 : (pages.length > 10 ? 2 : 1))
+                ctx.fillText(i + 1, padding.left + i * xStep, height - padding.bottom + 20);
 
-            // Calculate points
-            const points = [];
-            for (let i = 0; i < cumulative.length; i++) {
-                const x = padding.left + i * xStep;
-                const y = padding.top + chartHeight - cumulative[i] * yScale;
-                points.push({ x, y });
-            }
+            const points = cumulative.map((c, i) => ({
+                x: padding.left + i * xStep,
+                y: padding.top + chartHeight - c * yScale
+            }));
 
-            // Draw filled area with gradient
             const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
-            gradient.addColorStop(0, 'rgba(88, 166, 255, 0.4)');
-            gradient.addColorStop(1, 'rgba(88, 166, 255, 0.02)');
+            gradient.addColorStop(0, 'rgba(88,166,255,0.4)');
+            gradient.addColorStop(1, 'rgba(88,166,255,0.02)');
 
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, height - padding.bottom);
-            ctx.lineTo(points[0].x, points[0].y);
-            
-            // Smooth curve through points using bezier curves
-            for (let i = 0; i < points.length - 1; i++) {
-                const xc = (points[i].x + points[i + 1].x) / 2;
-                const yc = (points[i].y + points[i + 1].y) / 2;
-                ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-            }
-            ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-            
-            ctx.lineTo(points[points.length - 1].x, height - padding.bottom);
-            ctx.closePath();
-            ctx.fillStyle = gradient;
-            ctx.fill();
+            if (points.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(points[0].x, height - padding.bottom);
+                ctx.lineTo(points[0].x, points[0].y);
+                for (let i = 0; i < points.length - 1; i++) {
+                    const xc = (points[i].x + points[i+1].x) / 2, yc = (points[i].y + points[i+1].y) / 2;
+                    ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                }
+                ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+                ctx.lineTo(points[points.length-1].x, height - padding.bottom);
+                ctx.closePath(); ctx.fillStyle = gradient; ctx.fill();
 
-            // Draw smooth line
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 0; i < points.length - 1; i++) {
-                const xc = (points[i].x + points[i + 1].x) / 2;
-                const yc = (points[i].y + points[i + 1].y) / 2;
-                ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-            }
-            ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-            ctx.strokeStyle = '#58a6ff';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+                for (let i = 0; i < points.length - 1; i++) {
+                    const xc = (points[i].x + points[i+1].x) / 2, yc = (points[i].y + points[i+1].y) / 2;
+                    ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                }
+                ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+                ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 3; ctx.stroke();
 
-            // Draw fault points (big red dots with white border)
-            for (let i = 0; i < cumulative.length; i++) {
-                if (faultFlags[i]) {
-                    const x = points[i].x;
-                    const y = points[i].y;
-                    
-                    // Outer glow
-                    ctx.beginPath();
-                    ctx.arc(x, y, 12, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(248, 81, 73, 0.2)';
-                    ctx.fill();
-                    
-                    // White border ring
-                    ctx.beginPath();
-                    ctx.arc(x, y, 8, 0, Math.PI * 2);
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fill();
-                    
-                    // Red dot
-                    ctx.beginPath();
-                    ctx.arc(x, y, 6, 0, Math.PI * 2);
-                    ctx.fillStyle = '#f85149';
-                    ctx.fill();
+                for (let i = 0; i < cumulative.length; i++) {
+                    if (faultFlags[i]) {
+                        const {x, y} = points[i];
+                        ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI*2); ctx.fillStyle = 'rgba(248,81,73,0.2)'; ctx.fill();
+                        ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+                        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fillStyle = '#f85149'; ctx.fill();
+                    }
                 }
             }
 
-            // Axis labels
-            ctx.fillStyle = '#8b949e';
-            ctx.font = '12px Inter';
-            ctx.textAlign = 'center';
-            ctx.fillText('Step Number', width / 2, height - 5);
-
-            ctx.save();
-            ctx.translate(15, height / 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.fillText('Page Faults', 0, 0);
-            ctx.restore();
+            ctx.fillStyle = '#8b949e'; ctx.font = '12px Inter'; ctx.textAlign = 'center';
+            ctx.fillText('Step Number', width/2, height - 5);
+            ctx.save(); ctx.translate(15, height/2); ctx.rotate(-Math.PI/2);
+            ctx.fillText('Page Faults', 0, 0); ctx.restore();
         }
 
-        // Add segment
+        // ══════════════════════════════════════════════════════════════════════════
+        //  SEGMENTATION — NEW ADDITIONS START HERE
+        // ══════════════════════════════════════════════════════════════════════════
+
+        /**
+         * updateFitInfo()
+         * Refreshes the hint text under the Fit Strategy dropdown.
+         */
+        function updateFitInfo() {
+            const strategy = document.getElementById('fitStrategy').value;
+            const infoEl = document.getElementById('fitInfo');
+            const hints = {
+                first: 'Scans from the start and uses the <strong>first free hole</strong> that is large enough. Fast, but can leave awkward fragments at the front.',
+                best:  'Searches the <strong>entire free list</strong> and picks the smallest hole that fits. Minimises wasted space per allocation but can leave tiny unusable slivers.',
+                worst: 'Picks the <strong>largest available hole</strong>. Leaves bigger leftover pieces so future large segments have room — but can exhaust large holes quickly.'
+            };
+            infoEl.innerHTML = hints[strategy];
+        }
+
+        /**
+         * simulateSegmentation(segmentList, totalMemory, strategy)
+         *
+         * NEW: supports First Fit, Best Fit, and Worst Fit.
+         *
+         * The free list starts as one hole spanning [0, totalMemory).
+         * Each segment is allocated from the appropriate hole according
+         * to the chosen strategy; the hole is then split.
+         *
+         * Returns: array of allocation objects (same shape as before).
+         */
+        function simulateSegmentation(segmentList, totalMemory, strategy = 'first') {
+            // Free list: array of {start, size} objects
+            let freeList = [{ start: 0, size: totalMemory }];
+            const allocations = [];
+
+            for (const seg of segmentList) {
+                // Find candidate holes that are large enough
+                const candidates = freeList
+                    .map((hole, idx) => ({ ...hole, idx }))
+                    .filter(h => h.size >= seg.size);
+
+                let chosen = null;
+
+                if (candidates.length === 0) {
+                    // No hole fits — allocation fails
+                    allocations.push({
+                        name: seg.name,
+                        size: seg.size,
+                        base: '-',
+                        end: '-',
+                        status: 'Failed',
+                        holeSize: null
+                    });
+                    continue;
+                }
+
+                if (strategy === 'first') {
+                    // First candidate in free-list order (lowest start address)
+                    chosen = candidates.reduce((a, b) => a.start < b.start ? a : b);
+                } else if (strategy === 'best') {
+                    // Smallest hole that fits
+                    chosen = candidates.reduce((a, b) => a.size < b.size ? a : b);
+                } else {
+                    // Worst fit — largest hole
+                    chosen = candidates.reduce((a, b) => a.size > b.size ? a : b);
+                }
+
+                const base = chosen.start;
+                allocations.push({
+                    name: seg.name,
+                    size: seg.size,
+                    base,
+                    end: base + seg.size,
+                    status: 'Allocated',
+                    holeSize: chosen.size    // stored so the table can show it
+                });
+
+                // Split the chosen hole
+                const remaining = chosen.size - seg.size;
+                if (remaining > 0) {
+                    freeList[chosen.idx] = { start: chosen.start + seg.size, size: remaining };
+                } else {
+                    freeList.splice(chosen.idx, 1);
+                }
+            }
+
+            // Attach final free list snapshot for Compact to use
+            allocations._freeList = freeList;
+            return allocations;
+        }
+
+        /**
+         * Compute the largest contiguous free block from a free list.
+         */
+        function largestFreeBlock(freeList) {
+            if (!freeList || freeList.length === 0) return 0;
+            return Math.max(...freeList.map(h => h.size));
+        }
+
+        // ─── Add segment ────────────────────────────────────────────────────────────
         function addSegment() {
             const name = document.getElementById('segName').value.trim();
             const sizeStr = document.getElementById('segSize').value.trim();
-
-            if (!name) {
-                alert('Input Error: Please enter a segment name.');
-                return;
-            }
-            
+            if (!name) { alert('Please enter a segment name.'); return; }
             const size = parseInt(sizeStr);
-            if (!size || size < 1) {
-                alert('Input Error: Segment size must be a positive integer (at least 1 KB).');
-                return;
-            }
-
+            if (!size || size < 1) { alert('Segment size must be a positive integer.'); return; }
             segments.push({ name, size });
             updateSegmentList();
             document.getElementById('segName').value = '';
@@ -1254,64 +1390,79 @@
             updateStatus(`Added segment: ${name} (${size} KB)`);
         }
 
-        // Update segment list UI
+        // ─── Update segment list UI (now with per-row delete button) ───────────────
         function updateSegmentList() {
             document.getElementById('segCount').textContent = `${segments.length} segment${segments.length !== 1 ? 's' : ''}`;
-            
             if (segments.length === 0) {
-                document.getElementById('segList').innerHTML = '<div class="empty-state" style="padding: 20px;">No segments added</div>';
+                document.getElementById('segList').innerHTML = '<div class="empty-state" style="padding:20px;">No segments added</div>';
                 return;
             }
-
             let html = '';
-            for (const seg of segments) {
+            for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
                 html += `<div class="segment-item">
                     <span class="segment-name">${seg.name}</span>
                     <span class="segment-size">${seg.size} KB</span>
+                    <button class="seg-delete-btn" title="Remove" onclick="deleteSegment(${i})">✕</button>
                 </div>`;
             }
             document.getElementById('segList').innerHTML = html;
         }
 
-        // Clear segments
+        // ── NEW: delete a single segment by index ──────────────────────────────────
+        function deleteSegment(idx) {
+            segments.splice(idx, 1);
+            updateSegmentList();
+            updateStatus(`Segment removed. ${segments.length} segment(s) remaining.`);
+        }
+
+        // ─── Clear all segments ─────────────────────────────────────────────────────
         function clearSegments() {
             segments = [];
+            lastAllocationResult = null;
             updateSegmentList();
             document.getElementById('segResultsTable').innerHTML = '<div class="empty-state">Run segmentation to see results</div>';
             document.getElementById('segStatus').textContent = 'Add segments and run';
             document.getElementById('segUsed').textContent = '-- KB';
             document.getElementById('segFree').textContent = '-- KB';
             document.getElementById('segFrag').textContent = '-- KB';
+            document.getElementById('compactBtn').disabled = true;
+            document.getElementById('compactDiff').classList.remove('visible');
             drawMemoryDiagram([]);
+            updateStatus('Segmentation cleared');
         }
 
-        // Run segmentation
+        // ─── Run segmentation ───────────────────────────────────────────────────────
         function runSegmentation() {
-            if (segments.length === 0) {
-                alert('Input Error: Please add at least one segment.');
-                return;
-            }
-
+            if (segments.length === 0) { alert('Please add at least one segment.'); return; }
             const totalMemStr = document.getElementById('totalMem').value.trim();
             const totalMem = totalMemStr ? parseInt(totalMemStr) : 512;
-            
-            if (!totalMem || totalMem < 1) {
-                alert('Input Error: Total memory must be a positive integer (at least 1).');
-                return;
-            }
+            if (!totalMem || totalMem < 1) { alert('Total memory must be a positive integer.'); return; }
 
-            const runBtn = document.querySelector('#segmentation .btn-primary');
+            const strategy = document.getElementById('fitStrategy').value;
+
+            const runBtn = document.querySelector('#segmentation .btn-secondary');
             runBtn.disabled = true;
             updateStatus('Running segmentation...');
 
             setTimeout(() => {
                 try {
-                    const allocations = simulateSegmentation(segments, totalMem);
-                    displaySegResults(allocations, totalMem);
+                    const allocations = simulateSegmentation(segments, totalMem, strategy);
+                    lastAllocationResult = { allocations, totalMem, strategy };
+
+                    displaySegResults(allocations, totalMem, strategy);
+
+                    // Enable Compact only when there is at least one allocated segment
+                    const hasAllocated = allocations.some(a => a.status === 'Allocated');
+                    document.getElementById('compactBtn').disabled = !hasAllocated;
+
+                    // Hide any stale compaction diff
+                    document.getElementById('compactDiff').classList.remove('visible');
+
                     const failedCount = allocations.filter(a => a.status === 'Failed').length;
-                    updateStatus(`Segmentation complete: ${allocations.length} segments processed, ${failedCount} failed`);
+                    updateStatus(`Segmentation (${strategy} fit) complete: ${allocations.length} segments, ${failedCount} failed`);
                 } catch (e) {
-                    alert('Error: Segmentation failed - ' + e.message);
+                    alert('Segmentation failed: ' + e.message);
                     updateStatus('Segmentation failed');
                 } finally {
                     runBtn.disabled = false;
@@ -1319,38 +1470,10 @@
             }, 50);
         }
 
-        // Simulate segmentation
-        function simulateSegmentation(segmentList, totalMemory) {
-            const allocations = [];
-            let currentAddr = 0;
-
-            for (const seg of segmentList) {
-                if (currentAddr + seg.size <= totalMemory) {
-                    allocations.push({
-                        name: seg.name,
-                        size: seg.size,
-                        base: currentAddr,
-                        end: currentAddr + seg.size,
-                        status: 'Allocated'
-                    });
-                    currentAddr += seg.size;
-                } else {
-                    allocations.push({
-                        name: seg.name,
-                        size: seg.size,
-                        base: '-',
-                        end: '-',
-                        status: 'Failed'
-                    });
-                }
-            }
-
-            return allocations;
-        }
-
-        // Display segmentation results
-        function displaySegResults(allocations, totalMemory) {
-            const usedMem = allocations.filter(a => a.status === 'Allocated').reduce((sum, a) => sum + a.size, 0);
+        // ─── Display segmentation results ──────────────────────────────────────────
+        // Now shows strategy + hole size column in the table
+        function displaySegResults(allocations, totalMemory, strategy) {
+            const usedMem = allocations.filter(a => a.status === 'Allocated').reduce((s, a) => s + a.size, 0);
             const freeMem = totalMemory - usedMem;
             const failedCount = allocations.filter(a => a.status === 'Failed').length;
 
@@ -1360,8 +1483,19 @@
             document.getElementById('segStatus').textContent = failedCount > 0 ? `${failedCount} failed` : 'All allocated';
             document.getElementById('segStatus').style.color = failedCount > 0 ? '#f85149' : '#3fb950';
 
+            const strategyLabel = { first: 'First Fit', best: 'Best Fit', worst: 'Worst Fit' }[strategy] || strategy;
+
             let tableHTML = `<table>
-                <thead><tr><th>Segment</th><th>Base Address</th><th>Size (KB)</th><th>End Address</th><th>Status</th></tr></thead><tbody>`;
+                <thead><tr>
+                    <th>Segment</th>
+                    <th>Base Addr</th>
+                    <th>Size (KB)</th>
+                    <th>End Addr</th>
+                    <th>Hole Used (KB)</th>
+                    <th>Strategy</th>
+                    <th>Status</th>
+                </tr></thead><tbody>`;
+
             for (const alloc of allocations) {
                 const rowClass = alloc.status === 'Allocated' ? 'allocated-row' : 'failed-row';
                 tableHTML += `<tr class="${rowClass}">
@@ -1369,6 +1503,8 @@
                     <td>${alloc.base}</td>
                     <td>${alloc.size}</td>
                     <td>${alloc.end}</td>
+                    <td>${alloc.holeSize !== null ? alloc.holeSize : '—'}</td>
+                    <td style="color:#8b949e;font-size:11px;">${strategyLabel}</td>
                     <td><strong>${alloc.status}</strong></td>
                 </tr>`;
             }
@@ -1378,90 +1514,134 @@
             drawMemoryDiagram(allocations, totalMemory);
         }
 
-        // Draw memory diagram
+        // ─── Draw memory diagram (unchanged logic) ─────────────────────────────────
         function drawMemoryDiagram(allocations, totalMemory = 512) {
             const canvas = document.getElementById('memoryCanvas');
             const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
-            const padding = 20;
-
+            const width = canvas.width, height = canvas.height, padding = 20;
             ctx.clearRect(0, 0, width, height);
 
-            const colors = ['#238636', '#1f6feb', '#a371f7', '#d29922', '#f85149', '#06b6d4', '#ec4899'];
-            const barWidth = width - 2 * padding;
-            const barHeight = height - 2 * padding;
+            const colors = ['#238636','#1f6feb','#a371f7','#d29922','#f85149','#06b6d4','#ec4899'];
+            const barWidth = width - 2 * padding, barHeight = height - 2 * padding;
+            let currentX = 0, colorIdx = 0;
 
-            let currentAddr = 0;
-            let colorIdx = 0;
-
-            ctx.strokeStyle = '#30363d';
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
             ctx.strokeRect(padding, padding, barWidth, barHeight);
 
             for (const alloc of allocations) {
                 if (alloc.status === 'Allocated') {
                     const segWidth = (alloc.size / totalMemory) * barWidth;
                     ctx.fillStyle = colors[colorIdx % colors.length];
-                    ctx.fillRect(padding + currentAddr, padding, segWidth - 1, barHeight);
-                    
-                    ctx.fillStyle = '#fff';
-                    ctx.font = 'bold 11px Inter';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    
+                    ctx.fillRect(padding + currentX, padding, segWidth - 1, barHeight);
+                    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Inter';
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                     const label = segWidth > 50 ? `${alloc.name} (${alloc.size})` : alloc.name;
-                    ctx.fillText(label, padding + currentAddr + segWidth / 2, padding + barHeight / 2);
-                    
-                    currentAddr += segWidth;
+                    ctx.fillText(label, padding + currentX + segWidth / 2, padding + barHeight / 2);
+                    currentX += segWidth;
                     colorIdx++;
                 }
             }
 
-            if (currentAddr < barWidth) {
-                const freeWidth = barWidth - currentAddr;
+            if (currentX < barWidth) {
+                const freeWidth = barWidth - currentX;
                 ctx.fillStyle = '#30363d';
-                ctx.fillRect(padding + currentAddr, padding, freeWidth - 1, barHeight);
-                
-                ctx.fillStyle = '#8b949e';
-                ctx.font = 'italic 11px Inter';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(`FREE (${Math.round(freeWidth / barWidth * totalMemory)} KB)`, padding + currentAddr + freeWidth / 2, padding + barHeight / 2);
+                ctx.fillRect(padding + currentX, padding, freeWidth - 1, barHeight);
+                ctx.fillStyle = '#8b949e'; ctx.font = 'italic 11px Inter';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(`FREE (${Math.round(freeWidth / barWidth * totalMemory)} KB)`,
+                    padding + currentX + freeWidth / 2, padding + barHeight / 2);
             }
 
-            ctx.fillStyle = '#8b949e';
-            ctx.font = '10px JetBrains Mono';
-            ctx.textAlign = 'left';
-            ctx.fillText('0', padding - 5, height - 5);
-            ctx.textAlign = 'right';
-            ctx.fillText(`${totalMemory} KB`, width - padding + 5, height - 5);
+            ctx.fillStyle = '#8b949e'; ctx.font = '10px JetBrains Mono';
+            ctx.textAlign = 'left'; ctx.fillText('0', padding - 5, height - 5);
+            ctx.textAlign = 'right'; ctx.fillText(`${totalMemory} KB`, width - padding + 5, height - 5);
         }
 
-        // Run comparison
+        // ══════════════════════════════════════════════════════════════════════════
+        //  NEW: compactMemory()
+        //
+        //  Compaction = move all allocated segments to the front of memory
+        //  so that all free space merges into one contiguous block at the end.
+        //
+        //  The function:
+        //    1. Computes the pre-compaction free-list and largest free block.
+        //    2. Re-draws the memory bar in the "after compaction" state.
+        //    3. Animates the Before/After progress bars in the diff panel.
+        //    4. Fills in the three stats (largest-before, contiguous-after, gain).
+        // ══════════════════════════════════════════════════════════════════════════
+        function compactMemory() {
+            if (!lastAllocationResult) return;
+            const { allocations, totalMem } = lastAllocationResult;
+
+            // ── 1. Analyse state BEFORE compaction ─────────────────────────────
+            const allocated = allocations.filter(a => a.status === 'Allocated');
+            const usedMem   = allocated.reduce((s, a) => s + a.size, 0);
+            const freeMem   = totalMem - usedMem;
+
+            // Build the actual free-list from the previous simulation result
+            const freeList = allocations._freeList || [];
+            const largestBefore = largestFreeBlock(freeList);
+
+            // After compaction all free space merges into one contiguous block
+            const contiguousAfter = freeMem;
+            const gained = contiguousAfter - largestBefore; // extra usable space gained
+
+            // ── 2. Redraw memory bar showing compacted layout ───────────────────
+            // Compact = allocated segments contiguous from address 0, free hole at end
+            const compactedAllocs = allocated.map((a, i, arr) => {
+                const base = arr.slice(0, i).reduce((s, x) => s + x.size, 0);
+                return { ...a, base, end: base + a.size };
+            });
+            drawMemoryDiagram(compactedAllocs, totalMem);
+
+            // ── 3. Show the diff panel ──────────────────────────────────────────
+            const diffEl = document.getElementById('compactDiff');
+            diffEl.classList.add('visible');
+
+            // Before bar: shows largest contiguous free / total as a fraction
+            const beforePct = Math.max((largestBefore / totalMem) * 100, 2);
+            const afterPct  = Math.max((contiguousAfter / totalMem) * 100, 2);
+
+            const beforeBar = document.getElementById('beforeBar');
+            const afterBar  = document.getElementById('afterBar');
+
+            // Start both bars at 0 width, then animate
+            beforeBar.style.width = '0%';
+            afterBar.style.width  = '0%';
+            beforeBar.textContent = '';
+            afterBar.textContent  = '';
+
+            // Trigger CSS transition by setting target after a frame
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    beforeBar.style.width = beforePct + '%';
+                    beforeBar.textContent = `${largestBefore} KB largest free`;
+                    afterBar.style.width  = afterPct + '%';
+                    afterBar.textContent  = `${contiguousAfter} KB contiguous`;
+                });
+            });
+
+            // ── 4. Fill stats ───────────────────────────────────────────────────
+            document.getElementById('cStatBefore').textContent = `${largestBefore} KB`;
+            document.getElementById('cStatAfter').textContent  = `${contiguousAfter} KB`;
+            document.getElementById('cStatGain').textContent   = gained > 0 ? `+${gained} KB` : `${gained} KB`;
+
+            updateStatus(`Compaction complete: free space merged from ${largestBefore} KB → ${contiguousAfter} KB contiguous`);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════
+        //  Comparison tab (unchanged)
+        // ══════════════════════════════════════════════════════════════════════════
         function runComparison() {
             const pageRef = document.getElementById('compPageRef').value.trim();
             const numFrames = parseInt(document.getElementById('compFrames').value);
-
-            if (!pageRef) {
-                alert('Input Error: Please enter a page reference string.');
-                return;
-            }
-
+            if (!pageRef) { alert('Please enter a page reference string.'); return; }
             const pages = parsePageRef(pageRef);
-            if (!pages || pages.length === 0) {
-                alert('Input Error: Invalid page reference string. Must be space-separated integers (e.g., 7 0 1 2 0 3).');
-                return;
-            }
-
-            if (!numFrames || numFrames < 1) {
-                alert('Input Error: Number of frames must be a positive integer (at least 1).');
-                return;
-            }
+            if (!pages || pages.length === 0) { alert('Invalid page reference string.'); return; }
+            if (!numFrames || numFrames < 1) { alert('Number of frames must be a positive integer.'); return; }
 
             const compareBtn = document.querySelector('#comparison .btn-primary');
-            compareBtn.disabled = true;
-            compareBtn.textContent = 'Comparing...';
+            compareBtn.disabled = true; compareBtn.textContent = 'Comparing...';
             updateStatus('Running comparison...');
 
             setTimeout(() => {
@@ -1471,25 +1651,19 @@
                     displayComparison(pages, lruResult, optResult, numFrames);
                     updateStatus(`Comparison complete: LRU=${lruResult.totalFaults} faults, Optimal=${optResult.totalFaults} faults`);
                 } catch (e) {
-                    alert('Error: Comparison failed - ' + e.message);
+                    alert('Comparison failed: ' + e.message);
                     updateStatus('Comparison failed');
                 } finally {
-                    compareBtn.disabled = false;
-                    compareBtn.textContent = 'Compare Algorithms';
+                    compareBtn.disabled = false; compareBtn.textContent = 'Compare Algorithms';
                 }
             }, 50);
         }
 
-        // Reset comparison tab
         function resetComparison() {
             document.getElementById('compPageRef').value = '';
             document.getElementById('compFrames').value = '';
-            document.getElementById('compLruFaults').textContent = '--';
-            document.getElementById('compLruHit').textContent = '--';
-            document.getElementById('compLruEff').textContent = '--';
-            document.getElementById('compOptFaults').textContent = '--';
-            document.getElementById('compOptHit').textContent = '--';
-            document.getElementById('compOptEff').textContent = '--';
+            ['compLruFaults','compLruHit','compLruEff','compOptFaults','compOptHit','compOptEff']
+                .forEach(id => document.getElementById(id).textContent = '--');
             document.getElementById('analysisBox').textContent = 'Run a comparison to see analysis';
             document.getElementById('analysisBox').className = 'analysis-box';
             document.getElementById('compTable').innerHTML = '<div class="empty-state">Run a comparison to see step-by-step execution</div>';
@@ -1497,40 +1671,32 @@
             updateStatus('Comparison tab reset');
         }
 
-        // Display comparison results
         function displayComparison(pages, lruResult, optResult, numFrames) {
             const { frameSnapshots: lruSnapshots, faultFlags: lruFaults, totalFaults: lruTotal } = lruResult;
             const { frameSnapshots: optSnapshots, faultFlags: optFaults, totalFaults: optTotal } = optResult;
-
             const total = pages.length;
-            const lruHits = total - lruTotal;
-            const optHits = total - optTotal;
-            const lruHitRatio = ((lruHits / total) * 100).toFixed(1);
-            const optHitRatio = ((optHits / total) * 100).toFixed(1);
-            const lruEff = lruTotal > 0 ? ((lruHits / lruTotal) * 100).toFixed(1) + '%' : 'N/A';
-            const optEff = optTotal > 0 ? ((optHits / optTotal) * 100).toFixed(1) + '%' : 'N/A';
+            const lruHitRatio = (((total - lruTotal) / total) * 100).toFixed(1);
+            const optHitRatio = (((total - optTotal) / total) * 100).toFixed(1);
+            const lruEff = lruTotal > 0 ? (((total - lruTotal) / lruTotal) * 100).toFixed(1) + '%' : 'N/A';
+            const optEff = optTotal > 0 ? (((total - optTotal) / optTotal) * 100).toFixed(1) + '%' : 'N/A';
 
             document.getElementById('compLruFaults').textContent = lruTotal;
             document.getElementById('compLruHit').textContent = lruHitRatio + '%';
             document.getElementById('compLruEff').textContent = lruEff;
-
             document.getElementById('compOptFaults').textContent = optTotal;
             document.getElementById('compOptHit').textContent = optHitRatio + '%';
             document.getElementById('compOptEff').textContent = optEff;
 
             drawCompChart(lruTotal, optTotal);
 
-            let analysis = '';
-            let analysisClass = 'analysis-box';
+            let analysis = '', analysisClass = 'analysis-box';
             if (optTotal < lruTotal) {
                 const diff = lruTotal - optTotal;
-                const pct = ((diff / lruTotal) * 100).toFixed(1);
-                analysis = `Optimal algorithm produced ${diff} fewer page faults than LRU (${pct}% improvement)`;
+                analysis = `Optimal produced ${diff} fewer page faults than LRU (${((diff/lruTotal)*100).toFixed(1)}% improvement)`;
                 analysisClass += ' positive';
             } else if (lruTotal < optTotal) {
                 const diff = optTotal - lruTotal;
-                const pct = ((diff / optTotal) * 100).toFixed(1);
-                analysis = `LRU algorithm produced ${diff} fewer page faults than Optimal (${pct}% improvement)`;
+                analysis = `LRU produced ${diff} fewer page faults than Optimal (${((diff/optTotal)*100).toFixed(1)}% improvement)`;
             } else {
                 analysis = 'Both algorithms produced the same number of page faults';
             }
@@ -1538,19 +1704,18 @@
             analysisBox.textContent = analysis;
             analysisBox.className = analysisClass;
 
-            let tableHTML = `<table>
-                <thead><tr><th>Step</th><th>Page</th><th>LRU Frames</th><th>LRU Fault</th><th>Optimal Frames</th><th>Optimal Fault</th></tr></thead><tbody>`;
-
+            let tableHTML = `<table><thead><tr>
+                <th>Step</th><th>Page</th><th>LRU Frames</th><th>LRU Fault</th>
+                <th>Optimal Frames</th><th>Optimal Fault</th>
+            </tr></thead><tbody>`;
             for (let i = 0; i < pages.length; i++) {
                 let rowClass = '';
                 if (lruFaults[i] && optFaults[i]) rowClass = 'both-fault-row';
                 else if (lruFaults[i]) rowClass = 'lru-fault-row';
                 else if (optFaults[i]) rowClass = 'opt-fault-row';
                 else rowClass = 'both-hit-row';
-
                 tableHTML += `<tr class="${rowClass}">
-                    <td>${i + 1}</td>
-                    <td>${pages[i]}</td>
+                    <td>${i+1}</td><td>${pages[i]}</td>
                     <td>[${lruSnapshots[i].join(', ')}]</td>
                     <td><strong>${lruFaults[i] ? 'FAULT' : 'HIT'}</strong></td>
                     <td>[${optSnapshots[i].join(', ')}]</td>
@@ -1561,14 +1726,11 @@
             document.getElementById('compTable').innerHTML = tableHTML;
         }
 
-        // Draw comparison bar chart
         function drawCompChart(lruFaults, optFaults) {
             const canvas = document.getElementById('compChart');
             const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = canvas.width, height = canvas.height;
             const padding = { top: 50, right: 40, bottom: 60, left: 60 };
-
             ctx.clearRect(0, 0, width, height);
 
             const maxY = Math.max(lruFaults, optFaults, 1) + 2;
@@ -1576,127 +1738,59 @@
             const chartHeight = height - padding.top - padding.bottom;
             const barWidth = Math.min(120, chartWidth * 0.35);
             const gap = (chartWidth - 2 * barWidth) / 3;
-
             const lruX = padding.left + gap;
             const optX = padding.left + gap + barWidth + gap;
-
+            const lruBottom = padding.top + chartHeight;
             const lruHeight = (lruFaults / maxY) * chartHeight;
             const optHeight = (optFaults / maxY) * chartHeight;
-
-            const lruBottom = padding.top + chartHeight;
             const lruTop = lruBottom - lruHeight;
-            const optTop = lruBottom - optHeight;
+            const optTop  = lruBottom - optHeight;
 
-            // Draw horizontal grid lines
-            ctx.strokeStyle = '#21262d';
-            ctx.lineWidth = 0.5;
+            ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5;
             for (let i = 0; i <= maxY; i++) {
                 const y = padding.top + chartHeight - (i / maxY) * chartHeight;
-                ctx.beginPath();
-                ctx.moveTo(padding.left, y);
-                ctx.lineTo(width - padding.right, y);
-                ctx.stroke();
-                
-                ctx.fillStyle = '#8b949e';
-                ctx.font = '11px Inter';
-                ctx.textAlign = 'right';
+                ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(width - padding.right, y); ctx.stroke();
+                ctx.fillStyle = '#8b949e'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
                 ctx.fillText(i, padding.left - 10, y + 4);
             }
 
-            // Chart title
-            ctx.fillStyle = '#e6edf3';
-            ctx.font = 'bold 16px Inter';
-            ctx.textAlign = 'center';
+            ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 16px Inter'; ctx.textAlign = 'center';
             ctx.fillText('Page Faults Comparison', width / 2, 25);
 
-            // Draw glow effects under bars
-            ctx.shadowColor = '#f97316';
-            ctx.shadowBlur = 30;
-            ctx.fillStyle = 'rgba(249, 115, 22, 0.3)';
-            roundRect(ctx, lruX - 10, lruBottom + 5, barWidth + 20, 15, 5);
-            ctx.fill();
-            
-            ctx.shadowColor = '#3b82f6';
-            ctx.shadowBlur = 30;
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
-            roundRect(ctx, optX - 10, lruBottom + 5, barWidth + 20, 15, 5);
-            ctx.fill();
-            
-            ctx.shadowBlur = 0;
+            const lruGrad = ctx.createLinearGradient(0, lruTop, 0, lruBottom);
+            lruGrad.addColorStop(0, '#f97316'); lruGrad.addColorStop(1, '#c2410c');
+            ctx.fillStyle = lruGrad;
+            roundRect(ctx, lruX, lruTop, barWidth, lruHeight, [15,15,0,0]); ctx.fill();
 
-            // Draw LRU bar with gradient
-            const lruGradient = ctx.createLinearGradient(0, lruTop, 0, lruBottom);
-            lruGradient.addColorStop(0, '#f97316');
-            lruGradient.addColorStop(0.5, '#ea580c');
-            lruGradient.addColorStop(1, '#c2410c');
-            
-            ctx.fillStyle = lruGradient;
-            roundRect(ctx, lruX, lruTop, barWidth, lruHeight, [15, 15, 0, 0]);
-            ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 2;
-            roundRect(ctx, lruX, lruTop, barWidth, lruHeight, [15, 15, 0, 0]);
-            ctx.stroke();
+            const optGrad = ctx.createLinearGradient(0, optTop, 0, lruBottom);
+            optGrad.addColorStop(0, '#3b82f6'); optGrad.addColorStop(1, '#1d4ed8');
+            ctx.fillStyle = optGrad;
+            roundRect(ctx, optX, optTop, barWidth, optHeight, [15,15,0,0]); ctx.fill();
 
-            // Draw Optimal bar with gradient
-            const optGradient = ctx.createLinearGradient(0, optTop, 0, lruBottom);
-            optGradient.addColorStop(0, '#3b82f6');
-            optGradient.addColorStop(0.5, '#2563eb');
-            optGradient.addColorStop(1, '#1d4ed8');
-            
-            ctx.fillStyle = optGradient;
-            roundRect(ctx, optX, optTop, barWidth, optHeight, [15, 15, 0, 0]);
-            ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 2;
-            roundRect(ctx, optX, optTop, barWidth, optHeight, [15, 15, 0, 0]);
-            ctx.stroke();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Inter'; ctx.textAlign = 'center';
+            ctx.fillText(lruFaults, lruX + barWidth/2, lruTop - 12);
+            ctx.fillText(optFaults, optX + barWidth/2, optTop - 12);
 
-            // Value labels on top of bars
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 22px Inter';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            ctx.shadowBlur = 4;
-            ctx.fillText(lruFaults, lruX + barWidth / 2, lruTop - 12);
-            ctx.fillText(optFaults, optX + barWidth / 2, optTop - 12);
-            ctx.shadowBlur = 0;
-
-            // X-axis labels
-            ctx.fillStyle = '#8b949e';
-            ctx.font = 'bold 14px Inter';
-            ctx.fillText('LRU', lruX + barWidth / 2, lruBottom + 25);
-            ctx.fillText('Optimal', optX + barWidth / 2, lruBottom + 25);
-
-            // Axis label
-            ctx.fillStyle = '#6e7681';
-            ctx.font = '11px Inter';
-            ctx.fillText('Algorithm', width / 2, height - 10);
+            ctx.fillStyle = '#8b949e'; ctx.font = 'bold 14px Inter';
+            ctx.fillText('LRU', lruX + barWidth/2, lruBottom + 25);
+            ctx.fillText('Optimal', optX + barWidth/2, lruBottom + 25);
         }
 
         function roundRect(ctx, x, y, width, height, radii) {
-            if (!Array.isArray(radii)) {
-                radii = [radii, radii, radii, radii];
-            }
-            const [tl, tr, br, bl] = radii;
+            if (!Array.isArray(radii)) radii = [radii,radii,radii,radii];
+            const [tl,tr,br,bl] = radii;
             ctx.beginPath();
-            ctx.moveTo(x + tl, y);
-            ctx.lineTo(x + width - tr, y);
-            ctx.quadraticCurveTo(x + width, y, x + width, y + tr);
-            ctx.lineTo(x + width, y + height - br);
-            ctx.quadraticCurveTo(x + width, y + height, x + width - br, y + height);
-            ctx.lineTo(x + bl, y + height);
-            ctx.quadraticCurveTo(x, y + height, x, y + height - bl);
-            ctx.lineTo(x, y + tl);
-            ctx.quadraticCurveTo(x, y, x + tl, y);
+            ctx.moveTo(x+tl, y);
+            ctx.lineTo(x+width-tr, y); ctx.quadraticCurveTo(x+width, y, x+width, y+tr);
+            ctx.lineTo(x+width, y+height-br); ctx.quadraticCurveTo(x+width, y+height, x+width-br, y+height);
+            ctx.lineTo(x+bl, y+height); ctx.quadraticCurveTo(x, y+height, x, y+height-bl);
+            ctx.lineTo(x, y+tl); ctx.quadraticCurveTo(x, y, x+tl, y);
             ctx.closePath();
         }
 
-        // Initialize memory diagram
+        // ─── Initialise ─────────────────────────────────────────────────────────────
         drawMemoryDiagram([]);
-        updateStatus('Ready - Select a tab to begin');
+        updateStatus('Ready — Select a tab to begin');
     </script>
 </body>
 </html>
